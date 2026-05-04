@@ -89,13 +89,14 @@ def main():
     # Instead of starting at 1, start EXACTLY at the highest ID we've ever found + 1.
     start_id = max(finished_ids) + 1 if finished_ids else 1
     
-    # Look ahead 1,500 IDs dynamically to catch any newly added words today.
-    todo_ids = list(range(start_id, start_id + 1500))
+    # Set a massive ceiling (250,000) so it can rip the whole DB on the first run.
+    # It will safely abort as soon as it hits the 300 empty streak.
+    todo_ids = list(range(start_id, start_id + 250000))
     
     print(f"DB currently holds {len(finished_ids)} finished entries.")
-    print(f"Fast-forwarding to ID {start_id} to check for new daily additions...")
+    print(f"Fast-forwarding to ID {start_id}...")
     
-    pbar = tqdm(total=len(todo_ids), desc="Fetching Daily Additions", unit="req")
+    pbar = tqdm(total=len(todo_ids), desc="Fetching Database", unit="req")
     
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         future_to_id = {executor.submit(fetch_worker, i): i for i in todo_ids}
@@ -122,6 +123,9 @@ def main():
             # If we hit a streak of 300 missing words, we know we've reached the absolute end of the DB
             if empty_streak > 300:
                 print(f"\n[!] Reached end of database. Threshold reached at ID {word_id}.")
+                # Force the progress bar to finish gracefully
+                pbar.n = len(todo_ids) 
+                pbar.refresh()
                 break
 
     pbar.close()
