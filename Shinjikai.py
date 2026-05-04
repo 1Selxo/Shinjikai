@@ -3,31 +3,34 @@ import json
 import os
 import glob
 import time
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 # --- Configuration ---
-MAX_WORKERS = 20  
+MAX_WORKERS = 10  # LOWERED: 20 was pulling 128 req/s which triggered an IP ban.
 CLIENT_ID = "rlViYQFTKkM"
 API_URL = "https://shinjikai.app/rpc/LoadWordDetails"
 IMAGE_BASE_URL = "https://shinjikai.app/static/word_pictures/"
 DATA_DIR = "shinjikai_data"
 IMAGE_DIR = "yomitan_images"
-CHUNK_SIZE = 10000 # Breaks the DB into chunks to avoid GitHub's 100MB file limit
+CHUNK_SIZE = 10000 
 
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(IMAGE_DIR, exist_ok=True)
 
 session = requests.Session()
-retries = Retry(total=5, backoff_factor=0.3, status_forcelist=[500, 502, 503, 504])
+retries = Retry(total=3, backoff_factor=0.5, status_forcelist=[429, 500, 502, 503, 504]) # Reduced retries so it doesn't hang as long
 adapter = HTTPAdapter(pool_connections=MAX_WORKERS, pool_maxsize=MAX_WORKERS, max_retries=retries)
 session.mount('https://', adapter)
 
+# --- KILL SWITCH ---
+# This allows us to tell all 250,000 queued threads to instantly abort if we hit the end
+abort_flag = threading.Event()
+
 def get_finished_ids():
     finished = set()
-    
-    # 1. Read your old original file if it exists
     if os.path.exists("raw_shinjikai_data.jsonl"):
         with open("raw_shinjikai_data.jsonl", "r", encoding="utf-8") as f:
             for line in f:
@@ -37,7 +40,6 @@ def get_finished_ids():
                         finished.add(entry["Word"]["Id"])
                 except: continue
                 
-    # 2. Read the new chunked directory files
     for filepath in glob.glob(os.path.join(DATA_DIR, "*.jsonl")):
         with open(filepath, "r", encoding="utf-8") as f:
             for line in f:
@@ -50,7 +52,7 @@ def get_finished_ids():
     return finished
 
 def download_image(filename):
-    if not filename: return
+    if not filename or abort_flag.is_set(): return
     path = os.path.join(IMAGE_DIR, filename)
     if os.path.exists(path): return
     try:
@@ -61,6 +63,10 @@ def download_image(filename):
     except: pass
 
 def fetch_worker(word_id):
+    # If the kill switch is pulled, instantly skip this task so the script can close
+    if abort_flag.is_set():
+        return word_id, None
+
     headers = {"Content-Type": "text/plain;charset=UTF-8", "X-Client-Id": CLIENT_ID}
     payload = {"Id": word_id}
     
@@ -69,7 +75,6 @@ def fetch_worker(word_id):
         if response.status_code == 200:
             data = response.json()
             if data and "Word" in data:
-                # --- Image Extraction ---
                 word_info = data["Word"]
                 if "Meanings" in word_info:
                     for m in word_info["Meanings"]:
@@ -85,17 +90,14 @@ def fetch_worker(word_id):
 
 def main():
     finished_ids = get_finished_ids()
-    
-    # Instead of starting at 1, start EXACTLY at the highest ID we've ever found + 1.
     start_id = max(finished_ids) + 1 if finished_ids else 1
     
-    # Set a massive ceiling (250,000) so it can rip the whole DB on the first run.
-    # It will safely abort as soon as it hits the 300 empty streak.
     todo_ids = list(range(start_id, start_id + 250000))
     total_todos = len(todo_ids)
     
-    print(f"DB currently holds {len(finished_ids)} finished entries.")
-    print(f"Fast-forwarding to ID {start_id}...")
+    # flush=True forces GitHub actions to print instantly
+    print(f"DB currently holds {len(finished_ids)} finished entries.", flush=True)
+    print(f"Fast-forwarding to ID {start_id}...", flush=True)
     
     processed = 0
     empty_streak = 0
@@ -106,13 +108,15 @@ def main():
         future_to_id = {executor.submit(fetch_worker, i): i for i in todo_ids}
         
         for future in as_completed(future_to_id):
+            # If we are aborting, just quietly consume the canceled tasks
+            if abort_flag.is_set():
+                continue
+
             word_id, raw_data = future.result()
             processed += 1
             
             if raw_data:
                 empty_streak = 0
-                
-                # Write to chunked files instead of 1 massive file
                 chunk_file = os.path.join(DATA_DIR, f"data_{word_id // CHUNK_SIZE}.jsonl")
                 with open(chunk_file, "a", encoding="utf-8") as f:
                     f.write(json.dumps(raw_data, ensure_ascii=False) + "\n")
@@ -121,7 +125,6 @@ def main():
             else:
                 empty_streak += 1
             
-            # Print a safe, clean update to the console every 250 iterations
             if processed % 250 == 0:
                 elapsed_time = time.time() - start_time
                 rate = processed / elapsed_time if elapsed_time > 0 else 0
@@ -129,14 +132,15 @@ def main():
                 print(f"Processed: {processed}/{total_todos} ({percent:.2f}%) | "
                       f"Speed: {rate:.1f} req/s | "
                       f"Streak: {empty_streak}/300 | "
-                      f"Last: {last_word}")
+                      f"Last: {last_word}", flush=True)
             
-            # If we hit a streak of 300 missing words, we know we've reached the absolute end of the DB
+            # If we get 300 empty responses, either we finished OR we got IP banned
             if empty_streak > 300:
-                print(f"\n[!] Reached end of database. Threshold reached at ID {word_id}.")
+                print(f"\n[!] Reached end of database OR server blocked IP. Threshold reached.", flush=True)
+                abort_flag.set() # Pull the kill switch
                 break
 
-    print("\n✅ Script completed successfully!")
+    print("\n✅ Script completed and exited cleanly!", flush=True)
 
 if __name__ == "__main__":
     main()
