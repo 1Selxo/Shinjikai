@@ -2,15 +2,14 @@ name: Daily Shinjikai DB Update
 
 on:
   schedule:
-    # This cron expression runs the script every day at 00:00 UTC (Midnight)
-    - cron: "0 0 * * *"
-  workflow_dispatch: # This allows you to click a button to run it manually
+    - cron: "0 0 * * *" # Runs automatically every day at midnight UTC
+  workflow_dispatch: # Gives you a manual "Run" button on GitHub
 
 jobs:
   scrape-and-update:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Crucial: Allows the bot to push code back to your repo
+      contents: write # Allows the bot to save files back to your repository
 
     steps:
       - name: Checkout Repository
@@ -31,17 +30,17 @@ jobs:
 
       - name: Commit and Push New Data
         run: |
-          # Set up the GitHub Actions bot user
+          # Identity for the GitHub Bot
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Stage the new JSONL files and the image folders
-          git add data/ yomitan_images/ raw_shinjikai_data.jsonl || true
+          # Add the new chunked data folder and images
+          git add shinjikai_data/ yomitan_images/ || true
           
-          # Check if there are actual changes before trying to commit
+          # If the bot found new daily words, commit and save them!
           if git diff --staged --quiet; then
             echo "No new entries found today. Nothing to commit."
           else
-            git commit -m "chore: automated daily Shinjikai DB update"
+            git commit -m "Automated daily Shinjikai DB update"
             git push
           fi
