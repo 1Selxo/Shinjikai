@@ -2,10 +2,10 @@ import requests
 import json
 import os
 import glob
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from tqdm import tqdm
 
 # --- Configuration ---
 MAX_WORKERS = 20  
@@ -92,18 +92,22 @@ def main():
     # Set a massive ceiling (250,000) so it can rip the whole DB on the first run.
     # It will safely abort as soon as it hits the 300 empty streak.
     todo_ids = list(range(start_id, start_id + 250000))
+    total_todos = len(todo_ids)
     
     print(f"DB currently holds {len(finished_ids)} finished entries.")
     print(f"Fast-forwarding to ID {start_id}...")
     
-    pbar = tqdm(total=len(todo_ids), desc="Fetching Database", unit="req")
+    processed = 0
+    empty_streak = 0
+    start_time = time.time()
+    last_word = "N/A"
     
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         future_to_id = {executor.submit(fetch_worker, i): i for i in todo_ids}
         
-        empty_streak = 0
         for future in as_completed(future_to_id):
             word_id, raw_data = future.result()
+            processed += 1
             
             if raw_data:
                 empty_streak = 0
@@ -113,22 +117,26 @@ def main():
                 with open(chunk_file, "a", encoding="utf-8") as f:
                     f.write(json.dumps(raw_data, ensure_ascii=False) + "\n")
                 
-                word_label = raw_data["Word"].get("Kana", str(word_id))
-                pbar.set_postfix({"last": word_label})
+                last_word = raw_data["Word"].get("Kana", str(word_id))
             else:
                 empty_streak += 1
             
-            pbar.update(1)
+            # Print a safe, clean update to the console every 250 iterations
+            if processed % 250 == 0:
+                elapsed_time = time.time() - start_time
+                rate = processed / elapsed_time if elapsed_time > 0 else 0
+                percent = (processed / total_todos) * 100
+                print(f"Processed: {processed}/{total_todos} ({percent:.2f}%) | "
+                      f"Speed: {rate:.1f} req/s | "
+                      f"Streak: {empty_streak}/300 | "
+                      f"Last: {last_word}")
             
             # If we hit a streak of 300 missing words, we know we've reached the absolute end of the DB
             if empty_streak > 300:
                 print(f"\n[!] Reached end of database. Threshold reached at ID {word_id}.")
-                # Force the progress bar to finish gracefully
-                pbar.n = len(todo_ids) 
-                pbar.refresh()
                 break
 
-    pbar.close()
+    print("\n✅ Script completed successfully!")
 
 if __name__ == "__main__":
     main()
