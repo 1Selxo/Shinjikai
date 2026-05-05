@@ -412,7 +412,7 @@ def create_dictionary():
     current_revision = datetime.datetime.utcnow().strftime("1.8.%Y%m%d")
     
     index_data = {
-        "title": "Shinjikai Arabic-Japanese",
+        "title": "深辞海",
         "format": 3,
         "revision": current_revision,
         "sequenced": True,
