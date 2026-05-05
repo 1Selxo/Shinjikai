@@ -6,13 +6,12 @@ import re
 import datetime
 
 # File paths
-INPUT_DIR = 'shinjikai_data'      # Updated to target the folder
+INPUT_DIR = 'shinjikai_data'      # Target folder containing the chunked JSONL files
 OUTPUT_ZIP = 'Shinjikai_Dictionary.zip'
 IMAGES_DIR = 'yomitan_images' 
 TERMS_PER_BANK = 10000
 
 # --- Auto-Update Configuration ---
-# Matches the repository shown in your screenshots
 GITHUB_REPO = "kaihouguide/Shinjikai"
 INDEX_URL = f"https://github.com/{GITHUB_REPO}/releases/latest/download/index.json"
 DOWNLOAD_URL = f"https://github.com/{GITHUB_REPO}/releases/latest/download/{OUTPUT_ZIP}"
@@ -94,7 +93,8 @@ def create_dictionary():
                 writings = word.get("Writings",[])
                 meanings = word.get("Meanings",[])
                 
-                sentence_map = word.get("SentenceMap", {})
+                # BUGFIX: SentenceMap is at the root of the data line, not inside "Word"
+                sentence_map = data.get("SentenceMap", {})
                 
                 # --- 1. BUILD THE DEFINITIONS ---
                 structured_content_body =[]
@@ -113,7 +113,7 @@ def create_dictionary():
                             # Apply RTL Embedding to origin lines to securely fix Bidi wrapping and direction
                             origin_content_blocks =[]
                             for line in origin_lines:
-                                line_content = [{"tag": "span", "content": "\u202B"}] # Right-to-Left Embedding
+                                line_content =[{"tag": "span", "content": "\u202B"}] # Right-to-Left Embedding
                                 line_content.extend(parse_arabic(line))
                                 line_content.append({"tag": "span", "content": "\u202C"}) # Pop Directional Formatting
                                 origin_content_blocks.append({
@@ -164,7 +164,7 @@ def create_dictionary():
                             ar_content.append({"tag": "span", "content": f"\u202B({i}) "})
                             ar_content.extend(parse_arabic(ar_text))
                             
-                            # Add 'Related' arrows inline if they exist (making them clickable too)
+                            # Add 'Related' inline if they exist (clickable, arrow removed)
                             related_blocks =[]
                             if meaning.get("Related"):
                                 for rel in meaning["Related"]:
@@ -187,7 +187,7 @@ def create_dictionary():
                                                     }
                                                 ]
                                             })
-                                            related_blocks.append({"tag": "span", "content": " ⬅)"})
+                                            related_blocks.append({"tag": "span", "content": ")"}) 
                             
                             if related_blocks:
                                 ar_content.extend(related_blocks)
@@ -207,7 +207,7 @@ def create_dictionary():
                                 "content": ar_content
                             })
                         
-                    # Japanese Meaning + Source Bracket (Toggleable with Background Bar)
+                    # Japanese Meaning + Source Bracket (Toggleable)
                     jp_text = meaning.get("Japanese", "")
                     source = meaning.get("Source", "")
                     if jp_text or source:
@@ -284,11 +284,12 @@ def create_dictionary():
                             else:
                                 missing_images += 1
                             
-                    # Example Sentences (Toggleable with Background Bar)
+                    # Example Sentences (Toggleable with Shinjikai's Brown Theme)
                     sentence_ids = meaning.get("SentenceIds",[])
                     if sentence_ids and sentence_map:
                         sent_list =[]
-                        for sid in sentence_ids:
+                        
+                        for idx, sid in enumerate(sentence_ids):
                             s_data = sentence_map.get(str(sid))
                             if s_data:
                                 j_text = s_data.get("Text", "")
@@ -297,42 +298,43 @@ def create_dictionary():
                                 
                                 sent_item_content =[]
                                 
+                                # Subtle kana reading above text if different
                                 if j_kana and j_kana != j_text:
                                     sent_item_content.append({
                                         "tag": "div",
                                         "lang": "ja",
-                                        "data": {"shinjikai": "sent-kana"},
-                                        "style": {"fontSize": "0.75em", "color": "gray"},
+                                        "style": {"fontSize": "0.75em", "color": "#666666", "marginBottom": "2px"},
                                         "content": j_kana
                                     })
                                 
+                                # Japanese text
                                 sent_item_content.append({
                                     "tag": "div",
                                     "lang": "ja",
-                                    "data": {"shinjikai": "sent-jp"},
-                                    "style": {"fontSize": "1.05em"},
+                                    "style": {"fontSize": "1.1em", "marginBottom": "4px"},
                                     "content": j_text
                                 })
                                 
+                                # Arabic Translation
                                 sent_item_content.append({
                                     "tag": "div",
                                     "lang": "ar",
-                                    "data": {"shinjikai": "sent-ar"},
-                                    "style": {"marginTop": "2px", "fontSize": "0.95em"},
+                                    "style": {"fontSize": "0.95em", "marginTop": "2px"},
                                     "content": f"\u202B{a_text}\u202C" 
                                 })
                                 
+                                # Calculate borders (add border bottom to all items EXCEPT the very last one)
+                                li_style = {
+                                    "padding": "8px 10px",
+                                    "textAlign": "right",
+                                    "backgroundColor": "#ffffff" # White background matching screenshot
+                                }
+                                if idx < len(sentence_ids) - 1:
+                                    li_style["borderBottom"] = "1px solid #8e3e38" # Brown divider
+                                
                                 sent_list.append({
                                     "tag": "li",
-                                    "style": {
-                                        "paddingTop": "6px",
-                                        "paddingBottom": "6px",
-                                        "marginBottom": "4px",
-                                        "backgroundColor": "rgba(128, 128, 128, 0.05)", 
-                                        "paddingLeft": "8px",
-                                        "paddingRight": "8px",
-                                        "textAlign": "right"
-                                    },
+                                    "style": li_style,
                                     "content": sent_item_content
                                 })
                                 
@@ -341,9 +343,11 @@ def create_dictionary():
                                 "tag": "details",
                                 "lang": "ar", 
                                 "style": {
+                                    "marginTop": "10px",
                                     "marginBottom": "8px",
-                                    "backgroundColor": "rgba(128, 128, 128, 0.1)", 
-                                    "padding": "6px 10px"
+                                    "border": "1px solid #8e3e38", # Dark brown border
+                                    "borderRadius": "4px",
+                                    "overflow": "hidden"
                                 },
                                 "content":[
                                     {
@@ -352,14 +356,16 @@ def create_dictionary():
                                             "textAlign": "right",
                                             "fontSize": "0.95em",
                                             "fontWeight": "bold",
-                                            "cursor": "pointer"
+                                            "cursor": "pointer",
+                                            "backgroundColor": "#8e3e38", # Dark brown header
+                                            "color": "#ffffff", # White text
+                                            "padding": "6px 10px"
                                         },
-                                        "content": "【例】 أمثلة توضيحية"
+                                        "content": "【例】 الأمثلة"
                                     },
                                     {
                                         "tag": "ul",
-                                        "data": {"shinjikai": "sentences"},
-                                        "style": {"listStyleType": "none", "padding": "0", "marginTop": "8px", "marginBottom": "0"},
+                                        "style": {"listStyleType": "none", "padding": "0", "margin": "0"},
                                         "content": sent_list
                                     }
                                 ]
@@ -412,7 +418,7 @@ def create_dictionary():
     current_revision = datetime.datetime.utcnow().strftime("1.8.%Y%m%d")
     
     index_data = {
-        "title": "深辞海",
+        "title": "Shinjikai Arabic-Japanese",
         "format": 3,
         "revision": current_revision,
         "sequenced": True,
