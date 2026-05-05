@@ -9,7 +9,7 @@ jobs:
   scrape-and-update:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Allows the bot to save files back to your repository
+      contents: write # Allows the bot to save files back and create releases
 
     steps:
       - name: Checkout Repository
@@ -29,6 +29,7 @@ jobs:
         run: python Shinjikai.py
 
       - name: Commit and Push New Data
+        id: commit
         run: |
           # Identity for the GitHub Bot
           git config --global user.name "github-actions[bot]"
@@ -37,10 +38,31 @@ jobs:
           # Add the new chunked data folder and images
           git add shinjikai_data/ yomitan_images/ || true
           
-          # If the bot found new daily words, commit and save them!
+          # Check if there are changes to commit
           if git diff --staged --quiet; then
             echo "No new entries found today. Nothing to commit."
+            echo "has_changes=false" >> $GITHUB_OUTPUT
           else
             git commit -m "Automated daily Shinjikai DB update"
             git push
+            echo "has_changes=true" >> $GITHUB_OUTPUT
           fi
+
+      - name: Run Convertor
+        # Run if there are new words, OR if the user triggered it manually
+        if: steps.commit.outputs.has_changes == 'true' || github.event_name == 'workflow_dispatch'
+        run: python convertor.py
+
+      - name: Create GitHub Release
+        if: steps.commit.outputs.has_changes == 'true' || github.event_name == 'workflow_dispatch'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Generate a unique tag based on the current date and time (UTC)
+          TAG_NAME="v$(date -u +'%Y.%m.%d-%H%M')"
+          
+          # Create a new release and upload the dictionary files
+          gh release create "$TAG_NAME" Shinjikai_Dictionary.zip index.json \
+            --title "Shinjikai Dictionary Update ($TAG_NAME)" \
+            --notes "Automated dictionary build containing the latest Shinjikai data." \
+            --latest
