@@ -32,11 +32,12 @@ def parse_arabic(text):
             if ":" in inner:
                 # Linked word / Redirect (Converted into an interactive Yomitan hyperlink)
                 word = inner.split(":", 1)[0]
-                parts.append({
-                    "tag": "a", 
-                    "href": f"?query={word}", 
-                    "content": word
-                })
+                if word:
+                    parts.append({
+                        "tag": "a", 
+                        "href": f"?query={word}", 
+                        "content": word
+                    })
             else:
                 # Green Pill Badge
                 parts.append({
@@ -48,8 +49,7 @@ def parse_arabic(text):
                         "paddingRight": "5px",
                         "marginLeft": "5px",
                         "marginRight": "5px",
-                        "fontSize": "0.85em",
-                        "borderRadius": "3px"
+                        "fontSize": "0.85em"
                     },
                     "content": inner
                 })
@@ -93,7 +93,6 @@ def create_dictionary():
                 writings = word.get("Writings",[])
                 meanings = word.get("Meanings",[])
                 
-                # BUGFIX: SentenceMap is at the root of the data line, not inside "Word"
                 sentence_map = data.get("SentenceMap", {})
                 
                 # --- 1. BUILD THE DEFINITIONS ---
@@ -132,7 +131,10 @@ def create_dictionary():
                                 "style": {
                                     "marginBottom": "10px",
                                     "backgroundColor": "rgba(128, 128, 128, 0.1)", 
-                                    "padding": "8px 12px"
+                                    "paddingTop": "8px",
+                                    "paddingBottom": "8px",
+                                    "paddingLeft": "12px",
+                                    "paddingRight": "12px"
                                 },
                                 "content":[
                                     {
@@ -141,8 +143,7 @@ def create_dictionary():
                                         "style": {
                                             "fontWeight": "bold", 
                                             "textAlign": "right",
-                                            "fontSize": "1.05em",
-                                            "cursor": "pointer"
+                                            "fontSize": "1.05em"
                                         },
                                         "content": f"\u202B({i}) أصل الكلمة\u202C"
                                     },
@@ -172,7 +173,7 @@ def create_dictionary():
                                         rel_text = item.get("Text", "")
                                         rel_kana = item.get("Kana", "")
                                         if rel_text:
-                                            ruby_content = [rel_text]
+                                            ruby_content =[rel_text]
                                             if rel_kana and rel_kana != rel_text:
                                                 ruby_content.append({"tag": "rt", "content": rel_kana})
                                             
@@ -221,7 +222,10 @@ def create_dictionary():
                             "style": {
                                 "marginBottom": "8px",
                                 "backgroundColor": "rgba(128, 128, 128, 0.1)", 
-                                "padding": "6px 10px"
+                                "paddingTop": "6px",
+                                "paddingBottom": "6px",
+                                "paddingLeft": "10px",
+                                "paddingRight": "10px"
                             },
                             "content":[
                                 {
@@ -229,8 +233,7 @@ def create_dictionary():
                                     "style": {
                                         "textAlign": "right",
                                         "fontSize": "0.95em",
-                                        "fontWeight": "bold",
-                                        "cursor": "pointer"
+                                        "fontWeight": "bold"
                                     },
                                     "content": "【日】 التعريف الياباني"
                                 },
@@ -260,7 +263,10 @@ def create_dictionary():
                                 "textAlign": "right",
                                 "marginBottom": "8px",
                                 "backgroundColor": "rgba(128, 128, 128, 0.05)",
-                                "padding": "4px 8px"
+                                "paddingTop": "4px",
+                                "paddingBottom": "4px",
+                                "paddingLeft": "8px",
+                                "paddingRight": "8px"
                             },
                             "content": f"\u202Bملاحظة: {note_text}\u202C" 
                         })
@@ -277,14 +283,13 @@ def create_dictionary():
                                     "style": {"textAlign": "right", "marginTop": "10px", "marginBottom": "10px"},
                                     "content":[{
                                         "tag": "img",
-                                        "path": f"yomitan_images/{filename}",
-                                        "width": 180 
+                                        "path": f"yomitan_images/{filename}" 
                                     }]
                                 })
                             else:
                                 missing_images += 1
                             
-                    # Example Sentences (Toggleable with Shinjikai's Brown Theme)
+                    # Example Sentences (Toggleable with Shinjikai's Brown Theme - Safe styles)
                     sentence_ids = meaning.get("SentenceIds",[])
                     if sentence_ids and sentence_map:
                         sent_list =[]
@@ -323,18 +328,18 @@ def create_dictionary():
                                     "content": f"\u202B{a_text}\u202C" 
                                 })
                                 
-                                # Calculate borders (add border bottom to all items EXCEPT the very last one)
-                                li_style = {
-                                    "padding": "8px 10px",
-                                    "textAlign": "right",
-                                    "backgroundColor": "#ffffff" # White background matching screenshot
-                                }
-                                if idx < len(sentence_ids) - 1:
-                                    li_style["borderBottom"] = "1px solid #8e3e38" # Brown divider
-                                
+                                # Yomitan strict schema compliant "border" gap effect
                                 sent_list.append({
                                     "tag": "li",
-                                    "style": li_style,
+                                    "style": {
+                                        "paddingTop": "8px",
+                                        "paddingBottom": "8px",
+                                        "paddingRight": "10px",
+                                        "paddingLeft": "10px",
+                                        "textAlign": "right",
+                                        "backgroundColor": "#ffffff",
+                                        "marginBottom": "2px"
+                                    },
                                     "content": sent_item_content
                                 })
                                 
@@ -345,9 +350,8 @@ def create_dictionary():
                                 "style": {
                                     "marginTop": "10px",
                                     "marginBottom": "8px",
-                                    "border": "1px solid #8e3e38", # Dark brown border
-                                    "borderRadius": "4px",
-                                    "overflow": "hidden"
+                                    "backgroundColor": "#d1c2c0", # Creates the "borders" wrapping effect
+                                    "paddingBottom": "2px"
                                 },
                                 "content":[
                                     {
@@ -356,16 +360,23 @@ def create_dictionary():
                                             "textAlign": "right",
                                             "fontSize": "0.95em",
                                             "fontWeight": "bold",
-                                            "cursor": "pointer",
-                                            "backgroundColor": "#8e3e38", # Dark brown header
-                                            "color": "#ffffff", # White text
-                                            "padding": "6px 10px"
+                                            "backgroundColor": "#8e3e38", 
+                                            "color": "#ffffff", 
+                                            "paddingTop": "6px", 
+                                            "paddingBottom": "6px", 
+                                            "paddingLeft": "10px", 
+                                            "paddingRight": "10px",
+                                            "marginBottom": "2px"
                                         },
                                         "content": "【例】 الأمثلة"
                                     },
                                     {
                                         "tag": "ul",
-                                        "style": {"listStyleType": "none", "padding": "0", "margin": "0"},
+                                        "style": {
+                                            "listStyleType": "none", 
+                                            "paddingTop": "0", "paddingBottom": "0", "paddingLeft": "0", "paddingRight": "0", 
+                                            "marginTop": "0", "marginBottom": "0"
+                                        },
                                         "content": sent_list
                                     }
                                 ]
@@ -384,7 +395,7 @@ def create_dictionary():
                 if meanings_list_content:
                     structured_content_body.append({
                         "tag": "ul",
-                        "style": {"listStyleType": "none", "padding": "0", "margin": "0"},
+                        "style": {"listStyleType": "none", "paddingTop": "0", "paddingBottom": "0", "paddingLeft": "0", "paddingRight": "0", "marginTop": "0", "marginBottom": "0"},
                         "content": meanings_list_content
                     })
                 
