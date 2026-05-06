@@ -58,6 +58,48 @@ def parse_arabic(text):
                 parts.append({"tag": "span", "content": token})
     return parts
 
+
+def format_sentence_item(j_text, j_kana, a_text):
+    """Helper to format a single sentence item consistently."""
+    sent_item_content =[]
+    
+    # Subtle kana reading above text if different
+    if j_kana and j_kana != j_text:
+        sent_item_content.append({
+            "tag": "div",
+            "lang": "ja",
+            "style": {"fontSize": "0.75em", "color": "#666666", "marginBottom": "2px"},
+            "content": j_kana
+        })
+    
+    # Japanese text
+    sent_item_content.append({
+        "tag": "div",
+        "lang": "ja",
+        "style": {"fontSize": "1.05em", "marginBottom": "4px"},
+        "content": j_text
+    })
+    
+    # Arabic Translation
+    sent_item_content.append({
+        "tag": "div",
+        "lang": "ar",
+        "style": {"fontSize": "0.95em", "marginTop": "2px"},
+        "content": f"\u202B{a_text}\u202C" 
+    })
+    
+    return {
+        "tag": "li",
+        "style": {
+            "paddingTop": "6px",
+            "paddingBottom": "6px",
+            "textAlign": "right",
+            "marginBottom": "4px"
+        },
+        "content": sent_item_content
+    }
+
+
 def create_dictionary():
     terms =[]
     missing_images = 0
@@ -93,7 +135,14 @@ def create_dictionary():
                 writings = word.get("Writings",[])
                 meanings = word.get("Meanings",[])
                 
-                sentence_map = data.get("SentenceMap", {})
+                # BUGFIX: Collect sentences from BOTH SentenceMap AND SentenceSearch
+                all_sentences = {}
+                for sid, sdata in data.get("SentenceMap", {}).items():
+                    all_sentences[str(sid)] = sdata
+                for sdata in data.get("SentenceSearch", []):
+                    all_sentences[str(sdata.get("Id"))] = sdata
+                
+                rendered_sentence_ids = set()
                 
                 # --- 1. BUILD THE DEFINITIONS ---
                 structured_content_body =[]
@@ -289,69 +338,32 @@ def create_dictionary():
                             else:
                                 missing_images += 1
                             
-                    # Example Sentences (Toggleable with Shinjikai's Brown Theme - Safe styles)
-                    sentence_ids = meaning.get("SentenceIds",[])
-                    if sentence_ids and sentence_map:
+                    # Example Sentences (Toggleable - Styled like the JP Definition)
+                    sentence_ids = meaning.get("SentenceIds", [])
+                    if sentence_ids and all_sentences:
                         sent_list =[]
                         
-                        for idx, sid in enumerate(sentence_ids):
-                            s_data = sentence_map.get(str(sid))
+                        for sid in sentence_ids:
+                            s_data = all_sentences.get(str(sid))
                             if s_data:
+                                rendered_sentence_ids.add(str(sid))
                                 j_text = s_data.get("Text", "")
                                 j_kana = s_data.get("Kana", "")
                                 a_text = s_data.get("Arabic", "")
                                 
-                                sent_item_content =[]
-                                
-                                # Subtle kana reading above text if different
-                                if j_kana and j_kana != j_text:
-                                    sent_item_content.append({
-                                        "tag": "div",
-                                        "lang": "ja",
-                                        "style": {"fontSize": "0.75em", "color": "#666666", "marginBottom": "2px"},
-                                        "content": j_kana
-                                    })
-                                
-                                # Japanese text
-                                sent_item_content.append({
-                                    "tag": "div",
-                                    "lang": "ja",
-                                    "style": {"fontSize": "1.1em", "marginBottom": "4px"},
-                                    "content": j_text
-                                })
-                                
-                                # Arabic Translation
-                                sent_item_content.append({
-                                    "tag": "div",
-                                    "lang": "ar",
-                                    "style": {"fontSize": "0.95em", "marginTop": "2px"},
-                                    "content": f"\u202B{a_text}\u202C" 
-                                })
-                                
-                                # Yomitan strict schema compliant "border" gap effect
-                                sent_list.append({
-                                    "tag": "li",
-                                    "style": {
-                                        "paddingTop": "8px",
-                                        "paddingBottom": "8px",
-                                        "paddingRight": "10px",
-                                        "paddingLeft": "10px",
-                                        "textAlign": "right",
-                                        "backgroundColor": "#ffffff",
-                                        "marginBottom": "2px"
-                                    },
-                                    "content": sent_item_content
-                                })
+                                sent_list.append(format_sentence_item(j_text, j_kana, a_text))
                                 
                         if sent_list:
                             content_blocks.append({
                                 "tag": "details",
                                 "lang": "ar", 
                                 "style": {
-                                    "marginTop": "10px",
                                     "marginBottom": "8px",
-                                    "backgroundColor": "#d1c2c0", # Creates the "borders" wrapping effect
-                                    "paddingBottom": "2px"
+                                    "backgroundColor": "rgba(128, 128, 128, 0.1)", 
+                                    "paddingTop": "6px",
+                                    "paddingBottom": "6px",
+                                    "paddingLeft": "10px",
+                                    "paddingRight": "10px"
                                 },
                                 "content":[
                                     {
@@ -359,14 +371,7 @@ def create_dictionary():
                                         "style": {
                                             "textAlign": "right",
                                             "fontSize": "0.95em",
-                                            "fontWeight": "bold",
-                                            "backgroundColor": "#8e3e38", 
-                                            "color": "#ffffff", 
-                                            "paddingTop": "6px", 
-                                            "paddingBottom": "6px", 
-                                            "paddingLeft": "10px", 
-                                            "paddingRight": "10px",
-                                            "marginBottom": "2px"
+                                            "fontWeight": "bold"
                                         },
                                         "content": "【例】 الأمثلة"
                                     },
@@ -375,7 +380,7 @@ def create_dictionary():
                                         "style": {
                                             "listStyleType": "none", 
                                             "paddingTop": "0", "paddingBottom": "0", "paddingLeft": "0", "paddingRight": "0", 
-                                            "marginTop": "0", "marginBottom": "0"
+                                            "marginTop": "8px", "marginBottom": "0"
                                         },
                                         "content": sent_list
                                     }
@@ -392,6 +397,59 @@ def create_dictionary():
                         "content": content_blocks
                     })
                 
+                # --- LEFTOVER SENTENCES (Sentences that weren't tied to a specific meaning) ---
+                leftover_sids =[sid for sid in all_sentences.keys() if sid not in rendered_sentence_ids]
+                if leftover_sids:
+                    leftover_sent_list =[]
+                    for sid in leftover_sids:
+                        s_data = all_sentences[sid]
+                        j_text = s_data.get("Text", "")
+                        j_kana = s_data.get("Kana", "")
+                        a_text = s_data.get("Arabic", "")
+                        leftover_sent_list.append(format_sentence_item(j_text, j_kana, a_text))
+
+                    meanings_list_content.append({
+                        "tag": "li",
+                        "style": {
+                            "marginBottom": "12px", 
+                            "paddingBottom": "12px",
+                            "listStyleType": "none"
+                        },
+                        "content":[{
+                            "tag": "details",
+                            "lang": "ar", 
+                            "style": {
+                                "marginBottom": "8px",
+                                "backgroundColor": "rgba(128, 128, 128, 0.1)", 
+                                "paddingTop": "6px",
+                                "paddingBottom": "6px",
+                                "paddingLeft": "10px",
+                                "paddingRight": "10px"
+                            },
+                            "content":[
+                                {
+                                    "tag": "summary",
+                                    "style": {
+                                        "textAlign": "right",
+                                        "fontSize": "0.95em",
+                                        "fontWeight": "bold"
+                                    },
+                                    "content": "【例】 أمثلة إضافية"
+                                },
+                                {
+                                    "tag": "ul",
+                                    "style": {
+                                        "listStyleType": "none", 
+                                        "paddingTop": "0", "paddingBottom": "0", "paddingLeft": "0", "paddingRight": "0", 
+                                        "marginTop": "8px", "marginBottom": "0"
+                                    },
+                                    "content": leftover_sent_list
+                                }
+                            ]
+                        }]
+                    })
+                
+                # Wrap meanings into the structured content block
                 if meanings_list_content:
                     structured_content_body.append({
                         "tag": "ul",
