@@ -96,7 +96,7 @@ def format_sentence_item(j_text, j_kana, a_text):
         "style": {
             "fontSize": "0.95em", 
             "marginTop": "2px",
-            "direction": "rtl"  # Ensures periods & punctuation correctly sit on the left
+            "textAlign": "right"  # Relies on textAlign instead of direction for schema validity
         },
         "content": a_text
     })
@@ -172,7 +172,6 @@ def create_dictionary():
                                 "tag": "details",
                                 "lang": "ar",
                                 "style": {
-                                    "direction": "rtl",
                                     "marginBottom": "10px",
                                     "backgroundColor": "rgba(128, 128, 128, 0.1)", 
                                     "paddingTop": "8px",
@@ -246,7 +245,6 @@ def create_dictionary():
                                 "lang": "ar",
                                 "data": {"shinjikai": "arabic"},
                                 "style": {
-                                    "direction": "rtl",
                                     "textAlign": "right",
                                     "fontSize": "1.15em",
                                     "marginBottom": "6px"
@@ -266,7 +264,6 @@ def create_dictionary():
                             "tag": "details",
                             "lang": "ar", 
                             "style": {
-                                "direction": "rtl",
                                 "marginBottom": "8px",
                                 "backgroundColor": "rgba(128, 128, 128, 0.1)", 
                                 "paddingTop": "6px",
@@ -289,7 +286,6 @@ def create_dictionary():
                                     "lang": "ja",
                                     "data": {"shinjikai": "japanese"},
                                     "style": {
-                                        "direction": "ltr",
                                         "textAlign": "right", 
                                         "marginTop": "8px",
                                         "fontSize": "0.95em"
@@ -299,7 +295,7 @@ def create_dictionary():
                             ]
                         })
                         
-                    # Notes (Passed through parse_arabic now!)
+                    # Notes
                     note_text = meaning.get("Note", "")
                     if note_text:
                         note_content = [{"tag": "span", "style": {"fontWeight": "bold"}, "content": "ملاحظة: "}]
@@ -310,7 +306,6 @@ def create_dictionary():
                             "lang": "ar",
                             "data": {"shinjikai": "note"},
                             "style": {
-                                "direction": "rtl",
                                 "fontSize": "0.9em", 
                                 "textAlign": "right",
                                 "marginBottom": "8px",
@@ -360,7 +355,6 @@ def create_dictionary():
                                 "tag": "details",
                                 "lang": "ar", 
                                 "style": {
-                                    "direction": "rtl",
                                     "marginBottom": "8px",
                                     "backgroundColor": "rgba(128, 128, 128, 0.1)", 
                                     "paddingTop": "6px",
@@ -381,7 +375,6 @@ def create_dictionary():
                                     {
                                         "tag": "ul",
                                         "style": {
-                                            "direction": "ltr",
                                             "listStyleType": "none", 
                                             "paddingTop": "0", "paddingBottom": "0", "paddingLeft": "0", "paddingRight": "0", 
                                             "marginTop": "8px", "marginBottom": "0"
@@ -423,7 +416,6 @@ def create_dictionary():
                             "tag": "details",
                             "lang": "ar", 
                             "style": {
-                                "direction": "rtl",
                                 "marginBottom": "8px",
                                 "backgroundColor": "rgba(128, 128, 128, 0.1)", 
                                 "paddingTop": "6px",
@@ -444,7 +436,6 @@ def create_dictionary():
                                 {
                                     "tag": "ul",
                                     "style": {
-                                        "direction": "ltr",
                                         "listStyleType": "none", 
                                         "paddingTop": "0", "paddingBottom": "0", "paddingLeft": "0", "paddingRight": "0", 
                                         "marginTop": "8px", "marginBottom": "0"
