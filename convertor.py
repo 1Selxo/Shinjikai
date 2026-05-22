@@ -18,25 +18,33 @@ DOWNLOAD_URL = f"https://github.com/{GITHUB_REPO}/releases/latest/download/{OUTP
 
 
 def parse_arabic(text):
-    """Parses Shinjikai special characters into Yomitan-compliant structured content."""
+    """Parses Shinjikai special characters and newlines into Yomitan-compliant structured content."""
     text = text.replace("$", " : ")
     if text.endswith("؛"):
         text = text[:-1]
     text = text.replace("(|", "(").replace("|)", ")")
     
-    parts =[]
-    tokens = re.split(r'(\{.*?\})', text)
+    parts = []
+    # Split by both brackets and newlines to preserve spacing
+    tokens = re.split(r'(\{.*?\}|\n)', text)
     for token in tokens:
-        if token.startswith("{") and token.endswith("}"):
+        if not token:
+            continue
+            
+        if token == '\n':
+            # Convert newlines to HTML line breaks
+            parts.append({"tag": "br"})
+        elif token.startswith("{") and token.endswith("}"):
             inner = token[1:-1]
             if ":" in inner:
-                # Linked word / Redirect (Converted into an interactive Yomitan hyperlink)
+                # Linked word / Redirect
                 word = inner.split(":", 1)[0]
                 if word:
                     parts.append({
                         "tag": "a", 
                         "href": f"?query={word}", 
-                        "content": word
+                        # \u2066 (LRI) and \u2069 (PDI) prevent Japanese text from breaking RTL punctuation
+                        "content": f"\u2066{word}\u2069" 
                     })
             else:
                 # Green Pill Badge
@@ -49,19 +57,20 @@ def parse_arabic(text):
                         "paddingRight": "5px",
                         "marginLeft": "5px",
                         "marginRight": "5px",
-                        "fontSize": "0.85em"
+                        "fontSize": "0.85em",
+                        "borderRadius": "3px"
                     },
-                    "content": inner
+                    "content": f"\u2066{inner}\u2069"
                 })
         else:
-            if token.strip():
+            if token.strip() or token == " ":
                 parts.append({"tag": "span", "content": token})
     return parts
 
 
 def format_sentence_item(j_text, j_kana, a_text):
     """Helper to format a single sentence item consistently."""
-    sent_item_content =[]
+    sent_item_content = []
     
     # Subtle kana reading above text if different
     if j_kana and j_kana != j_text:
@@ -84,8 +93,12 @@ def format_sentence_item(j_text, j_kana, a_text):
     sent_item_content.append({
         "tag": "div",
         "lang": "ar",
-        "style": {"fontSize": "0.95em", "marginTop": "2px"},
-        "content": f"\u202B{a_text}\u202C" 
+        "style": {
+            "fontSize": "0.95em", 
+            "marginTop": "2px",
+            "direction": "rtl"  # Ensures periods & punctuation correctly sit on the left
+        },
+        "content": a_text
     })
     
     return {
@@ -101,15 +114,13 @@ def format_sentence_item(j_text, j_kana, a_text):
 
 
 def create_dictionary():
-    terms =[]
+    terms = []
     missing_images = 0
     
-    # Check if directory exists
     if not os.path.exists(INPUT_DIR):
         print(f"Error: Directory '{INPUT_DIR}' not found!")
         return
 
-    # Process all .jsonl files in the shinjikai_data directory
     json_files = sorted([f for f in os.listdir(INPUT_DIR) if f.endswith('.jsonl')])
     
     for filename in json_files:
@@ -132,10 +143,10 @@ def create_dictionary():
                     
                 word_id = word.get("Id", 0)
                 kana = word.get("Kana", "")
-                writings = word.get("Writings",[])
-                meanings = word.get("Meanings",[])
+                writings = word.get("Writings", [])
+                meanings = word.get("Meanings", [])
                 
-                # BUGFIX: Collect sentences from BOTH SentenceMap AND SentenceSearch
+                # Collect sentences from BOTH SentenceMap AND SentenceSearch
                 all_sentences = {}
                 for sid, sdata in data.get("SentenceMap", {}).items():
                     all_sentences[str(sid)] = sdata
@@ -145,39 +156,23 @@ def create_dictionary():
                 rendered_sentence_ids = set()
                 
                 # --- 1. BUILD THE DEFINITIONS ---
-                structured_content_body =[]
-                meanings_list_content =[]
+                structured_content_body = []
+                meanings_list_content = []
                 
                 for i, meaning in enumerate(meanings, 1):
-                    content_blocks =[]
+                    content_blocks = []
                     
                     # Arabic Meaning / Word Origin
                     ar_text = meaning.get("Arabic", "")
                     if ar_text:
                         if ar_text.startswith("$") and "أصل الكلمة" in ar_text:
                             origin_text = ar_text.replace("$أصل الكلمة:\n", "").replace("$أصل الكلمة:", "").strip()
-                            origin_lines = origin_text.split("\n")
-                            
-                            # Apply RTL Embedding to origin lines to securely fix Bidi wrapping and direction
-                            origin_content_blocks =[]
-                            for line in origin_lines:
-                                line_content =[{"tag": "span", "content": "\u202B"}] # Right-to-Left Embedding
-                                line_content.extend(parse_arabic(line))
-                                line_content.append({"tag": "span", "content": "\u202C"}) # Pop Directional Formatting
-                                origin_content_blocks.append({
-                                    "tag": "div", 
-                                    "lang": "ar", 
-                                    "style": {
-                                        "marginBottom": "4px",
-                                        "textAlign": "right"
-                                    }, 
-                                    "content": line_content
-                                })
                             
                             content_blocks.append({
                                 "tag": "details",
                                 "lang": "ar",
                                 "style": {
+                                    "direction": "rtl",
                                     "marginBottom": "10px",
                                     "backgroundColor": "rgba(128, 128, 128, 0.1)", 
                                     "paddingTop": "8px",
@@ -185,7 +180,7 @@ def create_dictionary():
                                     "paddingLeft": "12px",
                                     "paddingRight": "12px"
                                 },
-                                "content":[
+                                "content": [
                                     {
                                         "tag": "summary",
                                         "lang": "ar",
@@ -194,7 +189,7 @@ def create_dictionary():
                                             "textAlign": "right",
                                             "fontSize": "1.05em"
                                         },
-                                        "content": f"\u202B({i}) أصل الكلمة\u202C"
+                                        "content": f"({i}) أصل الكلمة"
                                     },
                                     {
                                         "tag": "div",
@@ -204,25 +199,29 @@ def create_dictionary():
                                             "marginTop": "8px",
                                             "fontSize": "0.95em"
                                         },
-                                        "content": origin_content_blocks
+                                        "content": parse_arabic(origin_text)
                                     }
                                 ]
                             })
                         else:
                             # Standard Arabic Meaning Construction
-                            ar_content =[]
-                            ar_content.append({"tag": "span", "content": f"\u202B({i}) "})
+                            ar_content = []
+                            ar_content.append({
+                                "tag": "span", 
+                                "style": {"fontWeight": "bold", "marginLeft": "4px"}, 
+                                "content": f"({i})"
+                            })
                             ar_content.extend(parse_arabic(ar_text))
                             
-                            # Add 'Related' inline if they exist (clickable, arrow removed)
-                            related_blocks =[]
+                            # Add 'Related' inline if they exist
+                            related_blocks = []
                             if meaning.get("Related"):
                                 for rel in meaning["Related"]:
-                                    for item in rel.get("Items",[]):
+                                    for item in rel.get("Items", []):
                                         rel_text = item.get("Text", "")
                                         rel_kana = item.get("Kana", "")
                                         if rel_text:
-                                            ruby_content =[rel_text]
+                                            ruby_content = [rel_text]
                                             if rel_kana and rel_kana != rel_text:
                                                 ruby_content.append({"tag": "rt", "content": rel_kana})
                                             
@@ -230,7 +229,7 @@ def create_dictionary():
                                             related_blocks.append({
                                                 "tag": "a",
                                                 "href": f"?query={rel_text}",
-                                                "content":[
+                                                "content": [
                                                     {
                                                         "tag": "ruby",
                                                         "content": ruby_content
@@ -242,14 +241,12 @@ def create_dictionary():
                             if related_blocks:
                                 ar_content.extend(related_blocks)
                                 
-                            ar_content.append({"tag": "span", "content": "\u202C"}) # Pop Directional Formatting
-                            
                             content_blocks.append({
                                 "tag": "div",
                                 "lang": "ar",
                                 "data": {"shinjikai": "arabic"},
                                 "style": {
-                                    "fontWeight": "bold", 
+                                    "direction": "rtl",
                                     "textAlign": "right",
                                     "fontSize": "1.15em",
                                     "marginBottom": "6px"
@@ -257,7 +254,7 @@ def create_dictionary():
                                 "content": ar_content
                             })
                         
-                    # Japanese Meaning + Source Bracket (Toggleable)
+                    # Japanese Meaning + Source Bracket
                     jp_text = meaning.get("Japanese", "")
                     source = meaning.get("Source", "")
                     if jp_text or source:
@@ -269,6 +266,7 @@ def create_dictionary():
                             "tag": "details",
                             "lang": "ar", 
                             "style": {
+                                "direction": "rtl",
                                 "marginBottom": "8px",
                                 "backgroundColor": "rgba(128, 128, 128, 0.1)", 
                                 "paddingTop": "6px",
@@ -276,7 +274,7 @@ def create_dictionary():
                                 "paddingLeft": "10px",
                                 "paddingRight": "10px"
                             },
-                            "content":[
+                            "content": [
                                 {
                                     "tag": "summary",
                                     "style": {
@@ -291,6 +289,7 @@ def create_dictionary():
                                     "lang": "ja",
                                     "data": {"shinjikai": "japanese"},
                                     "style": {
+                                        "direction": "ltr",
                                         "textAlign": "right", 
                                         "marginTop": "8px",
                                         "fontSize": "0.95em"
@@ -300,14 +299,18 @@ def create_dictionary():
                             ]
                         })
                         
-                    # Notes
+                    # Notes (Passed through parse_arabic now!)
                     note_text = meaning.get("Note", "")
                     if note_text:
+                        note_content = [{"tag": "span", "style": {"fontWeight": "bold"}, "content": "ملاحظة: "}]
+                        note_content.extend(parse_arabic(note_text))
+                        
                         content_blocks.append({
                             "tag": "div",
                             "lang": "ar",
                             "data": {"shinjikai": "note"},
                             "style": {
+                                "direction": "rtl",
                                 "fontSize": "0.9em", 
                                 "textAlign": "right",
                                 "marginBottom": "8px",
@@ -317,11 +320,11 @@ def create_dictionary():
                                 "paddingLeft": "8px",
                                 "paddingRight": "8px"
                             },
-                            "content": f"\u202Bملاحظة: {note_text}\u202C" 
+                            "content": note_content 
                         })
                         
-                    # Images (Aligned to the Right)
-                    pictures = meaning.get("Pictures",[])
+                    # Images
+                    pictures = meaning.get("Pictures", [])
                     for pic in pictures:
                         filename = pic.get("Filename")
                         if filename:
@@ -330,7 +333,7 @@ def create_dictionary():
                                 content_blocks.append({
                                     "tag": "div",
                                     "style": {"textAlign": "right", "marginTop": "10px", "marginBottom": "10px"},
-                                    "content":[{
+                                    "content": [{
                                         "tag": "img",
                                         "path": f"yomitan_images/{filename}" 
                                     }]
@@ -338,11 +341,10 @@ def create_dictionary():
                             else:
                                 missing_images += 1
                             
-                    # Example Sentences (Toggleable - Styled like the JP Definition)
+                    # Example Sentences
                     sentence_ids = meaning.get("SentenceIds", [])
                     if sentence_ids and all_sentences:
-                        sent_list =[]
-                        
+                        sent_list = []
                         for sid in sentence_ids:
                             s_data = all_sentences.get(str(sid))
                             if s_data:
@@ -358,6 +360,7 @@ def create_dictionary():
                                 "tag": "details",
                                 "lang": "ar", 
                                 "style": {
+                                    "direction": "rtl",
                                     "marginBottom": "8px",
                                     "backgroundColor": "rgba(128, 128, 128, 0.1)", 
                                     "paddingTop": "6px",
@@ -365,7 +368,7 @@ def create_dictionary():
                                     "paddingLeft": "10px",
                                     "paddingRight": "10px"
                                 },
-                                "content":[
+                                "content": [
                                     {
                                         "tag": "summary",
                                         "style": {
@@ -378,6 +381,7 @@ def create_dictionary():
                                     {
                                         "tag": "ul",
                                         "style": {
+                                            "direction": "ltr",
                                             "listStyleType": "none", 
                                             "paddingTop": "0", "paddingBottom": "0", "paddingLeft": "0", "paddingRight": "0", 
                                             "marginTop": "8px", "marginBottom": "0"
@@ -397,10 +401,10 @@ def create_dictionary():
                         "content": content_blocks
                     })
                 
-                # --- LEFTOVER SENTENCES (Sentences that weren't tied to a specific meaning) ---
-                leftover_sids =[sid for sid in all_sentences.keys() if sid not in rendered_sentence_ids]
+                # --- LEFTOVER SENTENCES ---
+                leftover_sids = [sid for sid in all_sentences.keys() if sid not in rendered_sentence_ids]
                 if leftover_sids:
-                    leftover_sent_list =[]
+                    leftover_sent_list = []
                     for sid in leftover_sids:
                         s_data = all_sentences[sid]
                         j_text = s_data.get("Text", "")
@@ -415,10 +419,11 @@ def create_dictionary():
                             "paddingBottom": "12px",
                             "listStyleType": "none"
                         },
-                        "content":[{
+                        "content": [{
                             "tag": "details",
                             "lang": "ar", 
                             "style": {
+                                "direction": "rtl",
                                 "marginBottom": "8px",
                                 "backgroundColor": "rgba(128, 128, 128, 0.1)", 
                                 "paddingTop": "6px",
@@ -426,7 +431,7 @@ def create_dictionary():
                                 "paddingLeft": "10px",
                                 "paddingRight": "10px"
                             },
-                            "content":[
+                            "content": [
                                 {
                                     "tag": "summary",
                                     "style": {
@@ -439,6 +444,7 @@ def create_dictionary():
                                 {
                                     "tag": "ul",
                                     "style": {
+                                        "direction": "ltr",
                                         "listStyleType": "none", 
                                         "paddingTop": "0", "paddingBottom": "0", "paddingLeft": "0", "paddingRight": "0", 
                                         "marginTop": "8px", "marginBottom": "0"
@@ -457,14 +463,14 @@ def create_dictionary():
                         "content": meanings_list_content
                     })
                 
-                dict_entries =[]
+                dict_entries = []
                 if structured_content_body:
                     dict_entries.append({
                         "type": "structured-content",
                         "content": structured_content_body
                     })
                 else:
-                    dict_entries =["(No definition provided)"]
+                    dict_entries = ["(No definition provided)"]
 
                 # --- 2. CREATE ENTRIES FOR EVERY WRITING ---
                 if not writings:
@@ -483,7 +489,6 @@ def create_dictionary():
     # --- 3. PACKAGE EVERYTHING INTO A ZIP ---
     print(f"Packaging into {OUTPUT_ZIP}...")
     
-    # Generate dynamic revision based on current UTC date for Auto-Update triggering
     current_revision = datetime.datetime.utcnow().strftime("1.8.%Y%m%d")
     
     index_data = {
@@ -499,7 +504,6 @@ def create_dictionary():
         "downloadUrl": DOWNLOAD_URL
     }
 
-    # Save index.json to disk so it can be pushed/uploaded alongside the ZIP
     with open("index.json", "w", encoding="utf-8") as f:
         json.dump(index_data, f, ensure_ascii=False, indent=4)
         print("Generated 'index.json' locally for auto-update routing.")
