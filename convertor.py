@@ -16,9 +16,13 @@ GITHUB_REPO = "kaihouguide/Shinjikai"
 INDEX_URL = f"https://github.com/{GITHUB_REPO}/releases/latest/download/index.json"
 DOWNLOAD_URL = f"https://github.com/{GITHUB_REPO}/releases/latest/download/{OUTPUT_ZIP}"
 
+# Regex for Japanese characters, alphabets, and numbers to isolate LTR text from RTL Arabic text.
+JP_CHARS = r'\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf\u3400-\u4dbf\u3000-\u303f\uff00-\uffefa-zA-Z0-9'
+JP_GLUE = r'[\s\(\)（）\-\.,:;/]'
+JP_PATTERN = re.compile(rf'([{JP_CHARS}]+(?:{JP_GLUE}+[{JP_CHARS}]+)*)')
 
 def parse_arabic(text):
-    """Parses Shinjikai special characters and newlines into Yomitan-compliant structured content."""
+    """Parses Shinjikai special characters, extracts true furigana, and applies Unicode Bidi isolates."""
     text = text.replace("$", " : ")
     if text.endswith("؛"):
         text = text[:-1]
@@ -37,14 +41,25 @@ def parse_arabic(text):
         elif token.startswith("{") and token.endswith("}"):
             inner = token[1:-1]
             if ":" in inner:
-                # Linked word / Redirect
-                word = inner.split(":", 1)[0]
+                # Linked word / Redirect with TRUE FURIGANA parsing
+                parts_split = inner.split(":", 1)
+                word = parts_split[0]
+                kana = parts_split[1] if len(parts_split) > 1 else ""
+                
                 if word:
+                    ruby_content = [word]
+                    if kana:
+                        ruby_content.append({"tag": "rt", "content": kana})
+                        
                     parts.append({
                         "tag": "a", 
                         "href": f"?query={word}", 
-                        # \u2066 (LRI) and \u2069 (PDI) prevent Japanese text from breaking RTL punctuation
-                        "content": f"\u2066{word}\u2069" 
+                        # Wrap inside \u2066 (LTR Isolate) to prevent Japanese string disruption
+                        "content": [
+                            {"tag": "span", "content": "\u2066"},
+                            {"tag": "ruby", "content": ruby_content},
+                            {"tag": "span", "content": "\u2069"}
+                        ]
                     })
             else:
                 # Green Pill Badge
@@ -64,41 +79,60 @@ def parse_arabic(text):
                 })
         else:
             if token.strip() or token == " ":
-                parts.append({"tag": "span", "content": token})
+                # Process plain text to isolate Japanese runs and ensure correct LTR line wrapping
+                sub_tokens = JP_PATTERN.split(token)
+                for sub in sub_tokens:
+                    if not sub:
+                        continue
+                    if JP_PATTERN.fullmatch(sub):
+                        parts.append({
+                            "tag": "span", 
+                            "lang": "ja", 
+                            "content": f"\u2066{sub}\u2069"
+                        })
+                    else:
+                        parts.append({"tag": "span", "content": sub})
     return parts
 
 
 def format_sentence_item(j_text, j_kana, a_text):
-    """Helper to format a single sentence item consistently."""
+    """Formats sentence items with proper ruby tags instead of fake CSS margins."""
     sent_item_content = []
     
-    # Subtle kana reading above text if different
+    # Real Furigana mapping using HTML Ruby tag
     if j_kana and j_kana != j_text:
         sent_item_content.append({
             "tag": "div",
             "lang": "ja",
-            "style": {"fontSize": "0.75em", "color": "#666666", "marginBottom": "2px"},
-            "content": j_kana
+            "style": {"fontSize": "1.05em", "marginBottom": "4px"},
+            "content": [
+                {
+                    "tag": "ruby",
+                    "content": [
+                        j_text,
+                        {"tag": "rt", "content": j_kana}
+                    ]
+                }
+            ]
+        })
+    else:
+        sent_item_content.append({
+            "tag": "div",
+            "lang": "ja",
+            "style": {"fontSize": "1.05em", "marginBottom": "4px"},
+            "content": j_text
         })
     
-    # Japanese text
-    sent_item_content.append({
-        "tag": "div",
-        "lang": "ja",
-        "style": {"fontSize": "1.05em", "marginBottom": "4px"},
-        "content": j_text
-    })
-    
-    # Arabic Translation
+    # Arabic Translation (Wrapped in \u2067 RTL isolate to ensure proper punctuation behavior)
     sent_item_content.append({
         "tag": "div",
         "lang": "ar",
         "style": {
             "fontSize": "0.95em", 
             "marginTop": "2px",
-            "textAlign": "right"  # Relies on textAlign instead of direction for schema validity
+            "textAlign": "right" 
         },
-        "content": a_text
+        "content": f"\u2067{a_text}\u2069"
     })
     
     return {
@@ -146,7 +180,6 @@ def create_dictionary():
                 writings = word.get("Writings", [])
                 meanings = word.get("Meanings", [])
                 
-                # Collect sentences from BOTH SentenceMap AND SentenceSearch
                 all_sentences = {}
                 for sid, sdata in data.get("SentenceMap", {}).items():
                     all_sentences[str(sid)] = sdata
@@ -154,15 +187,12 @@ def create_dictionary():
                     all_sentences[str(sdata.get("Id"))] = sdata
                 
                 rendered_sentence_ids = set()
-                
-                # --- 1. BUILD THE DEFINITIONS ---
                 structured_content_body = []
                 meanings_list_content = []
                 
                 for i, meaning in enumerate(meanings, 1):
                     content_blocks = []
                     
-                    # Arabic Meaning / Word Origin
                     ar_text = meaning.get("Arabic", "")
                     if ar_text:
                         if ar_text.startswith("$") and "أصل الكلمة" in ar_text:
@@ -188,7 +218,7 @@ def create_dictionary():
                                             "textAlign": "right",
                                             "fontSize": "1.05em"
                                         },
-                                        "content": f"({i}) أصل الكلمة"
+                                        "content": f"\u2067({i}) أصل الكلمة\u2069"
                                     },
                                     {
                                         "tag": "div",
@@ -198,13 +228,14 @@ def create_dictionary():
                                             "marginTop": "8px",
                                             "fontSize": "0.95em"
                                         },
-                                        "content": parse_arabic(origin_text)
+                                        # Force Arabic Blocks to be explicitly RTL globally
+                                        "content": ["\u2067"] + parse_arabic(origin_text) + ["\u2069"]
                                     }
                                 ]
                             })
                         else:
                             # Standard Arabic Meaning Construction
-                            ar_content = []
+                            ar_content = ["\u2067"]
                             ar_content.append({
                                 "tag": "span", 
                                 "style": {"fontWeight": "bold", "marginLeft": "4px"}, 
@@ -212,7 +243,6 @@ def create_dictionary():
                             })
                             ar_content.extend(parse_arabic(ar_text))
                             
-                            # Add 'Related' inline if they exist
                             related_blocks = []
                             if meaning.get("Related"):
                                 for rel in meaning["Related"]:
@@ -229,16 +259,17 @@ def create_dictionary():
                                                 "tag": "a",
                                                 "href": f"?query={rel_text}",
                                                 "content": [
-                                                    {
-                                                        "tag": "ruby",
-                                                        "content": ruby_content
-                                                    }
+                                                    {"tag": "span", "content": "\u2066"},
+                                                    {"tag": "ruby", "content": ruby_content},
+                                                    {"tag": "span", "content": "\u2069"}
                                                 ]
                                             })
                                             related_blocks.append({"tag": "span", "content": ")"}) 
                             
                             if related_blocks:
                                 ar_content.extend(related_blocks)
+                            
+                            ar_content.append("\u2069")
                                 
                             content_blocks.append({
                                 "tag": "div",
@@ -252,7 +283,6 @@ def create_dictionary():
                                 "content": ar_content
                             })
                         
-                    # Japanese Meaning + Source Bracket
                     jp_text = meaning.get("Japanese", "")
                     source = meaning.get("Source", "")
                     if jp_text or source:
@@ -279,7 +309,7 @@ def create_dictionary():
                                         "fontSize": "0.95em",
                                         "fontWeight": "bold"
                                     },
-                                    "content": "【日】 التعريف الياباني"
+                                    "content": "\u2067【日】 التعريف الياباني\u2069"
                                 },
                                 {
                                     "tag": "div",
@@ -290,16 +320,16 @@ def create_dictionary():
                                         "marginTop": "8px",
                                         "fontSize": "0.95em"
                                     },
-                                    "content": jp_content
+                                    "content": f"\u2066{jp_content}\u2069"
                                 }
                             ]
                         })
                         
-                    # Notes
                     note_text = meaning.get("Note", "")
                     if note_text:
-                        note_content = [{"tag": "span", "style": {"fontWeight": "bold"}, "content": "ملاحظة: "}]
+                        note_content = ["\u2067", {"tag": "span", "style": {"fontWeight": "bold"}, "content": "ملاحظة: "}]
                         note_content.extend(parse_arabic(note_text))
+                        note_content.append("\u2069")
                         
                         content_blocks.append({
                             "tag": "div",
@@ -318,7 +348,6 @@ def create_dictionary():
                             "content": note_content 
                         })
                         
-                    # Images
                     pictures = meaning.get("Pictures", [])
                     for pic in pictures:
                         filename = pic.get("Filename")
@@ -336,7 +365,6 @@ def create_dictionary():
                             else:
                                 missing_images += 1
                             
-                    # Example Sentences
                     sentence_ids = meaning.get("SentenceIds", [])
                     if sentence_ids and all_sentences:
                         sent_list = []
@@ -370,7 +398,7 @@ def create_dictionary():
                                             "fontSize": "0.95em",
                                             "fontWeight": "bold"
                                         },
-                                        "content": "【例】 الأمثلة"
+                                        "content": "\u2067【例】 الأمثلة\u2069"
                                     },
                                     {
                                         "tag": "ul",
@@ -394,7 +422,6 @@ def create_dictionary():
                         "content": content_blocks
                     })
                 
-                # --- LEFTOVER SENTENCES ---
                 leftover_sids = [sid for sid in all_sentences.keys() if sid not in rendered_sentence_ids]
                 if leftover_sids:
                     leftover_sent_list = []
@@ -431,7 +458,7 @@ def create_dictionary():
                                         "fontSize": "0.95em",
                                         "fontWeight": "bold"
                                     },
-                                    "content": "【例】 أمثلة إضافية"
+                                    "content": "\u2067【例】 أمثلة إضافية\u2069"
                                 },
                                 {
                                     "tag": "ul",
@@ -446,7 +473,6 @@ def create_dictionary():
                         }]
                     })
                 
-                # Wrap meanings into the structured content block
                 if meanings_list_content:
                     structured_content_body.append({
                         "tag": "ul",
@@ -463,7 +489,6 @@ def create_dictionary():
                 else:
                     dict_entries = ["(No definition provided)"]
 
-                # --- 2. CREATE ENTRIES FOR EVERY WRITING ---
                 if not writings:
                     terms.append([kana, "", "", "", 0, dict_entries, word_id, ""])
                 else:
@@ -477,7 +502,6 @@ def create_dictionary():
     if missing_images > 0:
         print(f"Skipped {missing_images} missing images.")
     
-    # --- 3. PACKAGE EVERYTHING INTO A ZIP ---
     print(f"Packaging into {OUTPUT_ZIP}...")
     
     current_revision = datetime.datetime.utcnow().strftime("1.8.%Y%m%d")
