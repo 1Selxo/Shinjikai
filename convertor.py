@@ -4,6 +4,7 @@ import zipfile
 import math
 import re
 import datetime
+import difflib
 
 # File paths
 INPUT_DIR = 'shinjikai_data'      # Target folder containing the chunked JSONL files
@@ -16,48 +17,86 @@ GITHUB_REPO = "kaihouguide/Shinjikai"
 INDEX_URL = f"https://github.com/{GITHUB_REPO}/releases/latest/download/index.json"
 DOWNLOAD_URL = f"https://github.com/{GITHUB_REPO}/releases/latest/download/{OUTPUT_ZIP}"
 
-# Regex for Japanese characters, alphabets, and numbers to isolate LTR text from RTL Arabic text.
+# Regex for Japanese characters to isolate LTR text from RTL Arabic text.
 JP_CHARS = r'\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf\u3400-\u4dbf\u3000-\u303f\uff00-\uffefa-zA-Z0-9'
 JP_GLUE = r'[\s\(\)（）\-\.,:;/]'
 JP_PATTERN = re.compile(rf'([{JP_CHARS}]+(?:{JP_GLUE}+[{JP_CHARS}]+)*)')
 
+
+def generate_true_furigana(text, reading):
+    """
+    Intelligently generates precise Furigana only for Kanji.
+    Matches kana between the text and reading to leave them out of the <ruby> tags.
+    """
+    if not text:
+        return text
+    if not reading or text == reading:
+        return text
+        
+    sm = difflib.SequenceMatcher(None, text, reading)
+    content = []
+    
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == 'equal':
+            content.append(text[i1:i2])
+        else:
+            kanji = text[i1:i2]
+            kana = reading[j1:j2]
+            if kanji:
+                if kana:
+                    content.append({
+                        "tag": "ruby",
+                        "content": [
+                            kanji,
+                            {"tag": "rt", "content": kana}
+                        ]
+                    })
+                else:
+                    content.append(kanji)
+            elif kana:
+                content.append(kana)
+                
+    # Group contiguous string fragments back together
+    merged_content = []
+    for item in content:
+        if isinstance(item, str) and merged_content and isinstance(merged_content[-1], str):
+            merged_content[-1] += item
+        else:
+            merged_content.append(item)
+            
+    if len(merged_content) == 1 and isinstance(merged_content[0], str):
+        return merged_content[0]
+        
+    return merged_content
+
+
 def parse_arabic(text):
-    """Parses Shinjikai special characters, extracts true furigana, and applies Unicode Bidi isolates."""
+    """Parses Shinjikai special characters, extracts links, and applies Unicode Bidi isolates."""
     text = text.replace("$", " : ")
     if text.endswith("؛"):
         text = text[:-1]
     text = text.replace("(|", "(").replace("|)", ")")
     
     parts = []
-    # Split by both brackets and newlines to preserve spacing
     tokens = re.split(r'(\{.*?\}|\n)', text)
     for token in tokens:
         if not token:
             continue
             
         if token == '\n':
-            # Convert newlines to HTML line breaks
             parts.append({"tag": "br"})
         elif token.startswith("{") and token.endswith("}"):
             inner = token[1:-1]
             if ":" in inner:
-                # Linked word / Redirect with TRUE FURIGANA parsing
-                parts_split = inner.split(":", 1)
-                word = parts_split[0]
-                kana = parts_split[1] if len(parts_split) > 1 else ""
-                
+                # The section after the colon in `{word:id}` is just an ID, not furigana. We extract only the word.
+                word = inner.split(":", 1)[0]
                 if word:
-                    ruby_content = [word]
-                    if kana:
-                        ruby_content.append({"tag": "rt", "content": kana})
-                        
                     parts.append({
                         "tag": "a", 
                         "href": f"?query={word}", 
-                        # Wrap inside \u2066 (LTR Isolate) to prevent Japanese string disruption
                         "content": [
                             {"tag": "span", "content": "\u2066"},
-                            {"tag": "ruby", "content": ruby_content},
+                            word,
                             {"tag": "span", "content": "\u2069"}
                         ]
                     })
@@ -79,7 +118,6 @@ def parse_arabic(text):
                 })
         else:
             if token.strip() or token == " ":
-                # Process plain text to isolate Japanese runs and ensure correct LTR line wrapping
                 sub_tokens = JP_PATTERN.split(token)
                 for sub in sub_tokens:
                     if not sub:
@@ -96,34 +134,19 @@ def parse_arabic(text):
 
 
 def format_sentence_item(j_text, j_kana, a_text):
-    """Formats sentence items with proper ruby tags instead of fake CSS margins."""
+    """Formats sentence items with proper ruby tags precisely over Kanji elements."""
     sent_item_content = []
     
-    # Real Furigana mapping using HTML Ruby tag
-    if j_kana and j_kana != j_text:
-        sent_item_content.append({
-            "tag": "div",
-            "lang": "ja",
-            "style": {"fontSize": "1.05em", "marginBottom": "4px"},
-            "content": [
-                {
-                    "tag": "ruby",
-                    "content": [
-                        j_text,
-                        {"tag": "rt", "content": j_kana}
-                    ]
-                }
-            ]
-        })
-    else:
-        sent_item_content.append({
-            "tag": "div",
-            "lang": "ja",
-            "style": {"fontSize": "1.05em", "marginBottom": "4px"},
-            "content": j_text
-        })
+    furigana_content = generate_true_furigana(j_text, j_kana)
     
-    # Arabic Translation (Wrapped in \u2067 RTL isolate to ensure proper punctuation behavior)
+    sent_item_content.append({
+        "tag": "div",
+        "lang": "ja",
+        "style": {"fontSize": "1.05em", "marginBottom": "4px"},
+        "content": furigana_content
+    })
+    
+    # Arabic Translation
     sent_item_content.append({
         "tag": "div",
         "lang": "ar",
@@ -228,13 +251,11 @@ def create_dictionary():
                                             "marginTop": "8px",
                                             "fontSize": "0.95em"
                                         },
-                                        # Force Arabic Blocks to be explicitly RTL globally
                                         "content": ["\u2067"] + parse_arabic(origin_text) + ["\u2069"]
                                     }
                                 ]
                             })
                         else:
-                            # Standard Arabic Meaning Construction
                             ar_content = ["\u2067"]
                             ar_content.append({
                                 "tag": "span", 
@@ -250,19 +271,21 @@ def create_dictionary():
                                         rel_text = item.get("Text", "")
                                         rel_kana = item.get("Kana", "")
                                         if rel_text:
-                                            ruby_content = [rel_text]
-                                            if rel_kana and rel_kana != rel_text:
-                                                ruby_content.append({"tag": "rt", "content": rel_kana})
+                                            furigana_node = generate_true_furigana(rel_text, rel_kana)
+                                            link_content = [{"tag": "span", "content": "\u2066"}]
+                                            
+                                            if isinstance(furigana_node, list):
+                                                link_content.extend(furigana_node)
+                                            else:
+                                                link_content.append(furigana_node)
+                                                
+                                            link_content.append({"tag": "span", "content": "\u2069"})
                                             
                                             related_blocks.append({"tag": "span", "content": " ("})
                                             related_blocks.append({
                                                 "tag": "a",
                                                 "href": f"?query={rel_text}",
-                                                "content": [
-                                                    {"tag": "span", "content": "\u2066"},
-                                                    {"tag": "ruby", "content": ruby_content},
-                                                    {"tag": "span", "content": "\u2069"}
-                                                ]
+                                                "content": link_content
                                             })
                                             related_blocks.append({"tag": "span", "content": ")"}) 
                             
