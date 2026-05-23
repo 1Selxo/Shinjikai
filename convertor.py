@@ -88,8 +88,16 @@ def parse_arabic(text):
         elif token.startswith("{") and token.endswith("}"):
             inner = token[1:-1]
             if ":" in inner:
-                # The section after the colon in `{word:id}` is just an ID, not furigana. We extract only the word.
-                word = inner.split(":", 1)[0]
+                # The database format is {id:word}, not {word:id}.
+                # We identify the ID (usually a hex string or numbers) to safely extract the readable word.
+                p0, p1 = inner.split(":", 1)
+                
+                # If the first part is purely alphanumeric/hyphens (like a UUID), the word is the second part
+                if re.fullmatch(r'[a-fA-F0-9\-]+', p0.strip()):
+                    word = p1.strip()
+                else:
+                    word = p0.strip()
+                    
                 if word:
                     parts.append({
                         "tag": "a", 
@@ -567,6 +575,7 @@ def create_dictionary():
             print(f"Warning: Image folder '{IMAGES_DIR}' not found.")
 
     print("Yomitan dictionary creation complete!")
+
 
 if __name__ == "__main__":
     create_dictionary()
