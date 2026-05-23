@@ -21,11 +21,12 @@ os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(IMAGE_DIR, exist_ok=True)
 
 session = requests.Session()
-retries = Retry(total=3, backoff_factor=0.5, status_forcelist=[429, 500, 502, 503, 504]) 
+retries = Retry(total=3, backoff_factor=0.5, status_forcelist=[429, 500, 502, 503, 504]) # Reduced retries so it doesn't hang as long
 adapter = HTTPAdapter(pool_connections=MAX_WORKERS, pool_maxsize=MAX_WORKERS, max_retries=retries)
 session.mount('https://', adapter)
 
 # --- KILL SWITCH ---
+# This allows us to tell all 250,000 queued threads to instantly abort if we hit the end
 abort_flag = threading.Event()
 
 def get_finished_ids():
@@ -82,14 +83,6 @@ def fetch_worker(word_id):
                                 fname = pic.get("Filename")
                                 if fname:
                                     download_image(fname)
-                                    
-                                    # --- FIX: Clean up leaked picture ID from the meaning text ---
-                                    if "Text" in m and m["Text"] and fname in m["Text"]:
-                                        # Remove the raw hash ID and strip dangling spaces
-                                        m["Text"] = m["Text"].replace(fname, "").strip()
-                                        # Remove hanging semicolons/commas (like "؛") that were separating the ID
-                                        m["Text"] = m["Text"].strip("؛;،").strip()
-                                        
                 return word_id, data
         return word_id, None
     except Exception:
@@ -102,6 +95,7 @@ def main():
     todo_ids = list(range(start_id, start_id + 250000))
     total_todos = len(todo_ids)
     
+    # flush=True forces GitHub actions to print instantly
     print(f"DB currently holds {len(finished_ids)} finished entries.", flush=True)
     print(f"Fast-forwarding to ID {start_id}...", flush=True)
     
@@ -114,6 +108,7 @@ def main():
         future_to_id = {executor.submit(fetch_worker, i): i for i in todo_ids}
         
         for future in as_completed(future_to_id):
+            # If we are aborting, just quietly consume the canceled tasks
             if abort_flag.is_set():
                 continue
 
