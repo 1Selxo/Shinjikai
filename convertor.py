@@ -17,10 +17,9 @@ GITHUB_REPO = "kaihouguide/Shinjikai"
 INDEX_URL = f"https://github.com/{GITHUB_REPO}/releases/latest/download/index.json"
 DOWNLOAD_URL = f"https://github.com/{GITHUB_REPO}/releases/latest/download/{OUTPUT_ZIP}"
 
-# Regex for Japanese characters to isolate LTR text from RTL Arabic text.
-JP_CHARS = r'\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf\u3400-\u4dbf\u3000-\u303f\uff00-\uffefa-zA-Z0-9'
-# Removed , : ; . / from JP_GLUE so Arabic punctuation isn't swallowed into LTR isolates
-JP_GLUE = r'[\s\(\)（）\-]'
+# Regex for Japanese and Latin characters (now includes Latin Ext and Diacritics for ā, ī, ū, ṣ, etc.)
+JP_CHARS = r'\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf\u3400-\u4dbf\u3000-\u303f\uff00-\uffefa-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF\u0300-\u036F'
+JP_GLUE = r'[\s\(\)（）\-\']'
 JP_PATTERN = re.compile(rf'([{JP_CHARS}]+(?:{JP_GLUE}+[{JP_CHARS}]+)*)')
 
 
@@ -73,7 +72,17 @@ def generate_true_furigana(text, reading):
 
 def parse_arabic(text):
     """Parses Shinjikai special characters, extracts links, and applies Unicode Bidi isolates."""
+    
+    # 1. Bruteforce delete internal {anchor:...} markers
+    text = re.sub(r'\{\s*anchor\s*:.*?\}', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\{\s*anchor\s*\}', '', text, flags=re.IGNORECASE)
+    
+    # 2. Format Definition Delimiters
     text = text.replace("$", " : ")
+    
+    # 3. Clean up punctuation collisions (If an anchor was removed leaving "؛ : ")
+    text = re.sub(r'؛\s*:', ' :', text)
+    
     if text.endswith("؛"):
         text = text[:-1]
     text = text.replace("(|", "(").replace("|)", ")")
@@ -88,10 +97,6 @@ def parse_arabic(text):
             parts.append({"tag": "br"})
         elif token.startswith("{") and token.endswith("}"):
             inner = token[1:-1]
-            
-            # Hide purely structural {anchor:...} elements used by Shinjikai databases
-            if inner.lower().startswith("anchor:") or inner.lower() == "anchor":
-                continue
 
             if ":" in inner:
                 # The database format is {id:word}, not {word:id}.
@@ -103,6 +108,10 @@ def parse_arabic(text):
                     word = p1.strip()
                 else:
                     word = p0.strip()
+                    
+                # Final safeguard against malformed anchor links
+                if word.strip().lower() == "anchor":
+                    continue
                     
                 if word:
                     parts.append({
