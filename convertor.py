@@ -125,8 +125,7 @@ def parse_arabic(text):
                         "paddingRight": "5px",
                         "marginLeft": "5px",
                         "marginRight": "5px",
-                        "fontSize": "0.85em",
-                        "borderRadius": "3px"
+                        "fontSize": "0.85em"
                     },
                     "content": f"\u2066{inner}\u2069"
                 })
@@ -167,8 +166,7 @@ def format_sentence_item(j_text, j_kana, a_text):
         "style": {
             "fontSize": "0.95em", 
             "marginTop": "2px",
-            "textAlign": "right",
-            "direction": "rtl"
+            "textAlign": "right"
         },
         "content": f"\u2067{a_text}\u2069"
     })
@@ -179,7 +177,6 @@ def format_sentence_item(j_text, j_kana, a_text):
             "paddingTop": "6px",
             "paddingBottom": "6px",
             "textAlign": "right",
-            "direction": "rtl",
             "marginBottom": "4px"
         },
         "content": sent_item_content
@@ -242,7 +239,6 @@ def create_dictionary():
                                 "lang": "ar",
                                 "style": {
                                     "marginBottom": "10px",
-                                    "direction": "rtl",
                                     "backgroundColor": "rgba(128, 128, 128, 0.1)", 
                                     "paddingTop": "8px",
                                     "paddingBottom": "8px",
@@ -256,7 +252,6 @@ def create_dictionary():
                                         "style": {
                                             "fontWeight": "bold", 
                                             "textAlign": "right",
-                                            "direction": "rtl",
                                             "fontSize": "1.05em"
                                         },
                                         "content": f"\u2067({i}) أصل الكلمة\u2069"
@@ -266,7 +261,6 @@ def create_dictionary():
                                         "lang": "ar", 
                                         "style": {
                                             "textAlign": "right",
-                                            "direction": "rtl",
                                             "marginTop": "8px",
                                             "fontSize": "0.95em"
                                         },
@@ -319,7 +313,6 @@ def create_dictionary():
                                 "data": {"shinjikai": "arabic"},
                                 "style": {
                                     "textAlign": "right",
-                                    "direction": "rtl",
                                     "fontSize": "1.15em",
                                     "marginBottom": "6px"
                                 },
@@ -338,7 +331,6 @@ def create_dictionary():
                             "lang": "ar", 
                             "style": {
                                 "marginBottom": "8px",
-                                "direction": "rtl",
                                 "backgroundColor": "rgba(128, 128, 128, 0.1)", 
                                 "paddingTop": "6px",
                                 "paddingBottom": "6px",
@@ -350,7 +342,6 @@ def create_dictionary():
                                     "tag": "summary",
                                     "style": {
                                         "textAlign": "right",
-                                        "direction": "rtl",
                                         "fontSize": "0.95em",
                                         "fontWeight": "bold"
                                     },
@@ -383,7 +374,6 @@ def create_dictionary():
                             "style": {
                                 "fontSize": "0.9em", 
                                 "textAlign": "right",
-                                "direction": "rtl",
                                 "marginBottom": "8px",
                                 "backgroundColor": "rgba(128, 128, 128, 0.05)",
                                 "paddingTop": "4px",
@@ -402,7 +392,7 @@ def create_dictionary():
                             if os.path.exists(local_image_path):
                                 content_blocks.append({
                                     "tag": "div",
-                                    "style": {"textAlign": "right", "direction": "rtl", "marginTop": "10px", "marginBottom": "10px"},
+                                    "style": {"textAlign": "right", "marginTop": "10px", "marginBottom": "10px"},
                                     "content": [{
                                         "tag": "img",
                                         "path": f"yomitan_images/{filename}" 
@@ -430,7 +420,6 @@ def create_dictionary():
                                 "lang": "ar", 
                                 "style": {
                                     "marginBottom": "8px",
-                                    "direction": "rtl",
                                     "backgroundColor": "rgba(128, 128, 128, 0.1)", 
                                     "paddingTop": "6px",
                                     "paddingBottom": "6px",
@@ -442,7 +431,6 @@ def create_dictionary():
                                         "tag": "summary",
                                         "style": {
                                             "textAlign": "right",
-                                            "direction": "rtl",
                                             "fontSize": "0.95em",
                                             "fontWeight": "bold"
                                         },
@@ -492,7 +480,6 @@ def create_dictionary():
                             "lang": "ar", 
                             "style": {
                                 "marginBottom": "8px",
-                                "direction": "rtl",
                                 "backgroundColor": "rgba(128, 128, 128, 0.1)", 
                                 "paddingTop": "6px",
                                 "paddingBottom": "6px",
@@ -504,7 +491,6 @@ def create_dictionary():
                                     "tag": "summary",
                                     "style": {
                                         "textAlign": "right",
-                                        "direction": "rtl",
                                         "fontSize": "0.95em",
                                         "fontWeight": "bold"
                                     },
