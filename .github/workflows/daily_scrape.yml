@@ -2,67 +2,89 @@ name: Daily Shinjikai DB Update
 
 on:
   schedule:
-    - cron: "0 0 * * *" # Runs automatically every day at midnight UTC
-  workflow_dispatch: # Gives you a manual "Run" button on GitHub
+    - cron: "17 0 * * *"
+  workflow_dispatch:
+    inputs:
+      force_release:
+        description: Rebuild and publish even when no new entries are found
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: shinjikai-daily-update
+  cancel-in-progress: false
 
 jobs:
   scrape-and-update:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     permissions:
-      contents: write # Allows the bot to save files back and create releases
+      contents: write
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
-          python-version: "3.10"
+          python-version: "3.12"
+          cache: pip
 
-      - name: Install Dependencies
+      - name: Install dependencies
+        run: python -m pip install --requirement requirements.txt
+
+      - name: Run unit tests
+        run: python -m unittest discover --start-directory tests --verbose
+
+      - name: Run scraper
+        id: scrape
         run: |
-          python -m pip install --upgrade pip
-          pip install requests urllib3 tqdm
-
-      - name: Run Scraper
-        run: python Shinjikai.py
-
-      - name: Commit and Push New Data
-        id: commit
-        run: |
-          # Identity for the GitHub Bot
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # Add the new chunked data folder and images
-          git add shinjikai_data/ yomitan_images/ || true
-          
-          # Check if there are changes to commit
-          if git diff --staged --quiet; then
-            echo "No new entries found today. Nothing to commit."
-            echo "has_changes=false" >> $GITHUB_OUTPUT
+          python Shinjikai.py --summary-file scrape_summary.json
+          entries_found=$(python -c "import json; print(json.load(open('scrape_summary.json'))['entries_found'])")
+          echo "entries_found=$entries_found" >> "$GITHUB_OUTPUT"
+          if [ "$entries_found" -gt 0 ]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
           else
-            git commit -m "Automated daily Shinjikai DB update"
-            git push
-            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Run Convertor
-        # Run if there are new words, OR if the user triggered it manually
-        if: steps.commit.outputs.has_changes == 'true' || github.event_name == 'workflow_dispatch'
-        run: python convertor.py
+      - name: Update monthly automation checkpoint
+        run: python tool/update_heartbeat.py automation_heartbeat.json --minimum-days 30
 
-      - name: Create GitHub Release
-        if: steps.commit.outputs.has_changes == 'true' || github.event_name == 'workflow_dispatch'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Commit source updates
+        id: commit
         run: |
-          # Generate a unique tag based on the current date and time (UTC)
-          TAG_NAME="v$(date -u +'%Y.%m.%d-%H%M')"
-          
-          # Create a new release and upload the dictionary files
-          gh release create "$TAG_NAME" Shinjikai_Dictionary.zip index.json \
-            --title "Shinjikai Dictionary Update ($TAG_NAME)" \
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add shinjikai_data/ yomitan_images/ scrape_state.json automation_heartbeat.json
+          if git diff --staged --quiet; then
+            echo "No repository changes to commit."
+            echo "committed=false" >> "$GITHUB_OUTPUT"
+          else
+            git commit -m "Automated Shinjikai database update"
+            git pull --rebase origin main
+            git push origin HEAD:main
+            echo "committed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build dictionary and source snapshot
+        if: steps.scrape.outputs.has_changes == 'true' || inputs.force_release
+        run: |
+          python convertor.py
+          tar -czf Shinjikai_Source_Data.tar.gz shinjikai_data yomitan_images scrape_state.json
+
+      - name: Create GitHub release
+        if: steps.scrape.outputs.has_changes == 'true' || inputs.force_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag_name="v$(date -u +'%Y.%m.%d-%H%M')"
+          gh release create "$tag_name" \
+            Shinjikai_Dictionary.zip \
+            Shinjikai_Source_Data.tar.gz \
+            index.json \
+            --title "Shinjikai Dictionary Update ($tag_name)" \
             --notes "Automated dictionary build containing the latest Shinjikai data." \
             --latest

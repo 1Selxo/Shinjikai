@@ -13,7 +13,7 @@ IMAGES_DIR = 'yomitan_images'
 TERMS_PER_BANK = 10000
 
 # --- Auto-Update Configuration ---
-GITHUB_REPO = "kaihouguide/Shinjikai"
+GITHUB_REPO = "1Selxo/Shinjikai"
 INDEX_URL = f"https://github.com/{GITHUB_REPO}/releases/latest/download/index.json"
 DOWNLOAD_URL = f"https://github.com/{GITHUB_REPO}/releases/latest/download/{OUTPUT_ZIP}"
 
