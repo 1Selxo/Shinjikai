@@ -145,7 +145,9 @@ def fetch_word(word_id: int, config: ScrapeConfig) -> FetchResult:
         )
     if response.status_code in (401, 403):
         return FetchResult(word_id, FetchStatus.BLOCKED, detail=f"HTTP {response.status_code}")
-    if response.status_code == 404:
+    if response.status_code == 404 or (
+        response.status_code == 400 and response.text.strip() == "WordNotFound"
+    ):
         return FetchResult(word_id, FetchStatus.MISSING)
     if response.status_code >= 500:
         return FetchResult(word_id, FetchStatus.TRANSIENT_ERROR, detail=f"HTTP {response.status_code}")

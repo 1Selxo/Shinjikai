@@ -3,6 +3,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import Shinjikai
 from Shinjikai import FetchResult, FetchStatus, ScrapeConfig, ScrapeError
@@ -50,6 +51,36 @@ class ScraperTests(unittest.TestCase):
 
         results = Shinjikai.fetch_batch([1, 2, 3], fetcher, max_workers=3)
         self.assertEqual([result.word_id for result in results], [1, 2, 3])
+
+    def test_word_not_found_response_is_missing_but_other_400_is_an_error(self):
+        class Response:
+            headers = {}
+
+            def __init__(self, body):
+                self.status_code = 400
+                self.text = body
+
+        class Session:
+            def __init__(self, body):
+                self.body = body
+
+            def post(self, *args, **kwargs):
+                return Response(self.body)
+
+        with patch.object(Shinjikai, "wait_for_request_slot"), patch.object(
+            Shinjikai, "get_session", return_value=Session("WordNotFound")
+        ):
+            self.assertEqual(
+                Shinjikai.fetch_word(24, self.config()).status,
+                FetchStatus.MISSING,
+            )
+        with patch.object(Shinjikai, "wait_for_request_slot"), patch.object(
+            Shinjikai, "get_session", return_value=Session("MalformedRequest")
+        ):
+            self.assertEqual(
+                Shinjikai.fetch_word(24, self.config()).status,
+                FetchStatus.HTTP_ERROR,
+            )
 
     def test_rate_limit_fails_instead_of_becoming_database_end(self):
         self.seed(1)
