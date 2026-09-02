@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+scrape_summary.json
+Shinjikai_Dictionary.zip
+Shinjikai_Source_Data.tar.gz
+index.json
