@@ -1,5 +1,5 @@
 {
-  "high_water_mark": 85012,
+  "high_water_mark": 85013,
   "known_missing_ids": [
     24,
     36,
@@ -4876,7 +4876,7 @@
     78076,
     78077
   ],
-  "last_successful_check": "2026-09-07T04:42:52.600464+00:00",
+  "last_successful_check": "2026-09-08T04:38:25.199675+00:00",
   "pending_retry_ids": [],
   "version": 1
 }
