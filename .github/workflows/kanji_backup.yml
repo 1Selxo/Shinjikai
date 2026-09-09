@@ -1,0 +1,71 @@
+name: Shinjikai Kanji Offline Backup
+
+on:
+  schedule:
+    - cron: '43 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: Maximum new Unicode characters to check this run
+        default: '20000'
+        required: true
+        type: string
+
+concurrency:
+  group: shinjikai-kanji-backup
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 270
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: |
+            kanji_extract.py
+            requirements.txt
+            tests/test_kanji.py
+          sparse-checkout-cone-mode: false
+          filter: blob:none
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -p test_kanji.py -v
+      - name: Restore most recent successful kanji checkpoint
+        run: |
+          tag=$(gh release list --limit 1000 --json tagName --jq '[.[] | select(.tagName | startswith("kanji-"))][0].tagName // empty')
+          if [ -n "$tag" ]; then
+            gh release download "$tag" --pattern Shinjikai_Kanji.zip --output previous.zip
+          fi
+      - name: Download entries and all images
+        env:
+          SCAN_LIMIT: ${{ inputs.limit || '20000' }}
+        run: python kanji_extract.py --limit "$SCAN_LIMIT" --minutes 220 --rate 4
+      - name: Publish offline ZIP and coverage report
+        run: |
+          tag="kanji-$(date -u +'%Y%m%d-%H%M%S')-${GITHUB_RUN_ID}"
+          complete=$(python -c "import json; print(str(json.load(open('kanji_manifest.json'))['complete']).lower())")
+          flags=()
+          if [ "$complete" != true ]; then flags+=(--prerelease); fi
+          gh release create "$tag" Shinjikai_Kanji.zip kanji_manifest.json \
+            --target "$GITHUB_SHA" --latest=false "${flags[@]}" \
+            --title "Shinjikai kanji offline backup ($tag)" \
+            --notes 'Contains raw kanji JSONL, downloaded illustrations, GIF animations, PNG previews, and a resumable checkpoint. Consult manifest.json for exact coverage; prereleases are incomplete Unicode census checkpoints. Existing word-dictionary releases remain unchanged.'
+      - name: Preserve diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kanji-incomplete-diagnostics
+          path: |
+            Shinjikai_Kanji.zip
+            kanji_manifest.json
+          retention-days: 7
