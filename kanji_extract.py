@@ -6,6 +6,9 @@ import os
 import random
 import sqlite3
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from itertools import islice
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -75,18 +78,30 @@ def validate_response(cp, response):
 
 
 class Client:
-    def __init__(self, rate=4):
+    def __init__(self, rate=20):
         if rate <= 0:
             raise ValueError("rate must be positive")
         self.interval = 1 / rate
         self.next_at = 0
-        self.session = requests.Session()
-        self.session.headers["X-Client-Id"] = "rlViYQFTKkM"
+        self.lock = threading.Lock()
+        self.local = threading.local()
+        self.stopped = threading.Event()
+        self.asset_locks = [threading.Lock() for _ in range(64)]
+
+    @property
+    def session(self):
+        if not hasattr(self.local, 'session'):
+            self.local.session = requests.Session()
+            self.local.session.headers['X-Client-Id'] = 'rlViYQFTKkM'
+        return self.local.session
 
     def request(self, method, path, **kwargs):
         for attempt in range(5):
-            time.sleep(max(0, self.next_at - time.monotonic()))
-            self.next_at = time.monotonic() + self.interval
+            with self.lock:
+                if self.stopped.is_set():
+                    raise RuntimeError('Requests stopped after access denial')
+                time.sleep(max(0, self.next_at - time.monotonic()))
+                self.next_at = time.monotonic() + self.interval
             try:
                 r = self.session.request(method, BASE + path, timeout=(15, 45), **kwargs)
             except requests.RequestException:
@@ -95,14 +110,15 @@ class Client:
                 time.sleep(2 ** attempt + random.random())
                 continue
             if r.status_code in (401, 403):
+                self.stopped.set()
                 raise RuntimeError(f"Access denied at {path}; stopping without bypassing restrictions")
             if r.status_code == 429 or r.status_code >= 500:
                 if attempt == 4:
                     raise RuntimeError(f"Persistent HTTP {r.status_code} at {path}")
-                # Shared sequential pacing means all requests slow down together.
-                self.interval = min(4, self.interval * 2)
                 retry = requests.adapters.Retry().get_retry_after(r)
-                time.sleep(max(retry or 0, 2 ** attempt + random.random()))
+                with self.lock:
+                    self.interval = min(4, self.interval * 2)
+                    self.next_at = max(self.next_at, time.monotonic() + max(retry or 0, 2 ** attempt + random.random()))
                 continue
             return r
         raise RuntimeError("Retries exhausted")
@@ -127,6 +143,12 @@ def open_db(root):
 
 
 def asset(client, root, path, optional=False):
+    # Different entries can reference the same image. Protect its atomic write.
+    with client.asset_locks[int(sha(path.encode())[:8], 16) % 64]:
+        return download_asset(client, root, path, optional)
+
+
+def download_asset(client, root, path, optional=False):
     local = "assets/" + sha(path.encode()) + Path(path).suffix
     target = root / local
     if target.exists():
@@ -168,7 +190,7 @@ def export(db, root, output, error=None):
                 "confirmed_missing": checked - found, "remaining": total - checked,
                 "complete": checked == total and error is None, "error": error,
                 "consistency": "Sequential observations, not an atomic server snapshot"}
-    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as archive:
         archive.writestr("manifest.json", encoded(manifest))
         with archive.open("kanji.jsonl", "w") as out:
             paths = set()
@@ -187,7 +209,7 @@ def export(db, root, output, error=None):
                           "response": json.loads(payload), "assets": assets}
                 out.write((encoded(record) + "\n").encode())
         for path in sorted(paths):
-            archive.write(root / path, path)
+            archive.write(root / path, path, compress_type=zipfile.ZIP_STORED)
         archive.write(root / "checkpoint.sqlite", "checkpoint.sqlite")
     Path("kanji_manifest.json").write_text(encoded(manifest) + "\n", encoding="utf-8")
     print(encoded(manifest), flush=True)
@@ -210,14 +232,15 @@ def restore(archive_path, root):
 
 def main():
     parser = argparse.ArgumentParser(__doc__)
-    parser.add_argument("--limit", type=int, default=20000)
+    parser.add_argument("--limit", type=int, default=100000)
     parser.add_argument("--minutes", type=float, default=220)
-    parser.add_argument("--rate", type=float, default=4)
+    parser.add_argument("--rate", type=float, default=20)
+    parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--root", type=Path, default=Path("kanji_work"))
     parser.add_argument("--resume", type=Path, default=Path("previous.zip"))
     args = parser.parse_args()
-    if args.limit <= 0 or args.minutes <= 0:
-        parser.error("limit and minutes must be positive")
+    if args.limit <= 0 or args.minutes <= 0 or not 1 <= args.workers <= 16:
+        parser.error("limit/minutes must be positive; workers must be 1..16")
     restore(args.resume, args.root)
     db = open_db(args.root)
     client = Client(args.rate)
@@ -228,21 +251,30 @@ def main():
         if client.kanji(ord("楽")) is None:
             raise RuntimeError("Known-entry health check failed")
         processed = 0
-        for cp in candidates():
-            if db.execute("SELECT 1 FROM entries WHERE cp=?", (cp,)).fetchone():
-                continue
-            if processed >= args.limit or time.monotonic() - started >= args.minutes * 60:
-                break
+        visited = {row[0] for row in db.execute('SELECT cp FROM entries')}
+        remaining = (cp for cp in candidates() if cp not in visited)
+
+        def fetch(cp):
             data = client.kanji(cp)
             media = collect(client, args.root, cp, data) if data else []
-            # Commit only after ALL required assets succeed; errors remain unvisited.
-            db.execute("INSERT INTO entries VALUES (?,?,?)", (cp, encoded(data) if data else None, encoded(media)))
-            db.commit()
-            processed += 1
-            if processed % 100 == 0:
+            return cp, encoded(data) if data else None, encoded(media)
+
+        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+            while processed < args.limit and time.monotonic() - started < args.minutes * 60:
+                batch = list(islice(remaining, min(128, args.limit - processed)))
+                if not batch:
+                    break
+                # Bounded futures; only the main thread writes SQLite. A batch
+                # fails atomically if any record or required image is incomplete.
+                results = list(pool.map(fetch, batch))
+                db.executemany('INSERT INTO entries VALUES (?,?,?)', results)
+                db.commit()
+                processed += len(results)
                 if client.kanji(ord("楽")) is None:
                     raise RuntimeError("Known-entry health check failed during census")
-                print(f"Checked {processed} new characters, latest U+{cp:04X}", flush=True)
+                elapsed = time.monotonic() - started
+                print(f"Checked {processed} new characters; {processed / elapsed:.1f} chars/s; "
+                      f"latest U+{batch[-1]:04X}; request cap {1 / client.interval:.1f}/s", flush=True)
         if client.kanji(ord("楽")) is None:
             raise RuntimeError("Final known-entry health check failed")
     except Exception as exc:

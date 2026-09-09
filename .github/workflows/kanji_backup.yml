@@ -7,7 +7,7 @@ on:
     inputs:
       limit:
         description: Maximum new Unicode characters to check this run
-        default: '20000'
+        default: '100000'
         required: true
         type: string
 
@@ -48,8 +48,8 @@ jobs:
           fi
       - name: Download entries and all images
         env:
-          SCAN_LIMIT: ${{ inputs.limit || '20000' }}
-        run: python kanji_extract.py --limit "$SCAN_LIMIT" --minutes 220 --rate 4
+          SCAN_LIMIT: ${{ inputs.limit || '100000' }}
+        run: python kanji_extract.py --limit "$SCAN_LIMIT" --minutes 220 --rate 20 --workers 8
       - name: Publish offline ZIP and coverage report
         run: |
           tag="kanji-$(date -u +'%Y%m%d-%H%M%S')-${GITHUB_RUN_ID}"

@@ -4,6 +4,7 @@ import unittest
 import zipfile
 from pathlib import Path
 from unittest.mock import patch
+from concurrent.futures import ThreadPoolExecutor
 
 import kanji_extract as k
 
@@ -17,6 +18,19 @@ class Response:
 
 
 class KanjiTests(unittest.TestCase):
+    def test_concurrent_shared_asset_download_is_written_once(self):
+        class ImageResponse:
+            status_code = 200
+            headers = {'Content-Type': 'image/gif'}
+            content = b'GIF89a-test'
+        with tempfile.TemporaryDirectory() as temp:
+            client = k.Client()
+            with patch.object(client, 'request', return_value=ImageResponse()) as request:
+                with ThreadPoolExecutor(max_workers=8) as pool:
+                    results = list(pool.map(lambda _: k.asset(client, Path(temp), '/shared.gif'), range(32)))
+                self.assertEqual(request.call_count, 1)
+                self.assertTrue(all(x == results[0] for x in results))
+
     def test_only_explicit_missing_counts_as_absence(self):
         self.assertIsNone(k.validate_response(65, Response(400, 'KanjiNotFound')))
         for status in [403, 404, 429, 500]:

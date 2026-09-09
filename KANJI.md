@@ -4,6 +4,13 @@ Run **Shinjikai Kanji Offline Backup** in Actions. Scheduled runs every six
 hours resume the last successful `kanji-` release. The `limit` input bounds
 new characters per run; the time budget also checkpoints progress.
 
+The fast configuration uses eight worker threads, a shared 20 requests/second
+ceiling (including images and retries), batches of 128 database writes, and
+100,000 new characters per run. Each worker has its own connection session.
+Rate limiting slows all workers together; access denial stops requests.
+ZIP packaging stores already-compressed images directly and uses fast
+compression for JSON and checkpoint data. Existing checkpoints remain compatible.
+
 Download `Shinjikai_Kanji.zip` and extract it. It contains:
 
 - `kanji.jsonl`: one UTF-8 JSON record per entry, preserving the entire public
